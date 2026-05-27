@@ -53,17 +53,7 @@ function lynxModifierTransform(node, context) {
 }
 
 const plugins = [
-    // <= 1.8.27
-    ({ vueCompilerOptions }) => {
-        vueCompilerOptions.nativeTags = nativeTags;
-        return { version: 1 };
-    },
-    // <= 2.0.13
-    ({ vueCompilerOptions }) => {
-        vueCompilerOptions.nativeTags = nativeTags;
-        return { version: 2 };
-    },
-    // >= 2.0.14
+    // Vue Language Tools >= 2.0.14 (Feb 2024)
     () => {
         return {
             version: 2,
