@@ -121,14 +121,13 @@ export interface PluginVueLynxOptions {
    * default — list the package names (or RegExps matching them) here to
    * follow worklets shipped as a published/installed package.
    *
-   * Strings match exactly OR as a package-root prefix:
-   *   - `'@vue-lynx/motion-mini'` matches itself and any subpath like
-   *     `'@vue-lynx/motion-mini/dist/foo'`, but NOT
-   *     `'@vue-lynx/motion-mini-x'`.
-   *
-   * Patterns match the package specifier/name (e.g. `'@my-org/foo'`), never the
-   * resolved filesystem path, so a RegExp like `/^@my-org\//` matches whether
-   * the package is reached as an import or carved out of the loader exclude.
+   * Both checkpoints reduce their input to the package root before matching,
+   * so a pattern always matches the package name (e.g. `'@my-org/foo'`), never
+   * a subpath or the resolved filesystem path:
+   *   - strings match the root exactly — `'@vue-lynx/motion-mini'` covers the
+   *     package and all its subpath imports, but NOT `'@vue-lynx/motion-mini-x'`;
+   *   - a RegExp like `/^@my-org\//` matches whether the package is reached as
+   *     an import or carved out of the `node_modules` loader exclude.
    *
    * @example
    * ```ts

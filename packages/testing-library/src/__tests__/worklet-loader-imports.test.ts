@@ -31,6 +31,7 @@ import {
   isUnderNodeModules,
   isWorkletPackage,
   packageNameFromNodeModulesPath,
+  packageRootFromSpecifier,
 } from '../../../vue-lynx/plugin/src/loaders/worklet-utils.js';
 
 /** Resolve specifiers from a fixed map; anything unlisted is unresolvable. */
@@ -51,10 +52,25 @@ describe('isUnderNodeModules', () => {
   });
 });
 
+describe('packageRootFromSpecifier', () => {
+  it('reduces scoped and unscoped specifiers to the package root', () => {
+    expect(packageRootFromSpecifier('@my-org/foo/dist/x')).toBe('@my-org/foo');
+    expect(packageRootFromSpecifier('@my-org/foo')).toBe('@my-org/foo');
+    expect(packageRootFromSpecifier('lodash/fp')).toBe('lodash');
+    expect(packageRootFromSpecifier('lodash')).toBe('lodash');
+  });
+
+  it('returns null for input with no usable package segment', () => {
+    expect(packageRootFromSpecifier('')).toBe(null);
+    expect(packageRootFromSpecifier('@scope')).toBe(null);
+  });
+});
+
 describe('isWorkletPackage', () => {
-  it('exact and package-root prefix match', () => {
+  // Inputs are already reduced to a package root (see packageRootFromSpecifier),
+  // so matching is exact for strings and a direct test for RegExp.
+  it('matches a root exactly', () => {
     expect(isWorkletPackage('@org/motion', ['@org/motion'])).toBe(true);
-    expect(isWorkletPackage('@org/motion/sub', ['@org/motion'])).toBe(true);
   });
 
   it('does NOT match same-prefix-different-package', () => {
@@ -62,7 +78,7 @@ describe('isWorkletPackage', () => {
     expect(isWorkletPackage('motion', ['mo'])).toBe(false);
   });
 
-  it('RegExp is tested against the full specifier', () => {
+  it('RegExp is tested against the package root', () => {
     expect(isWorkletPackage('@my-org/lynx-anim', [/^@my-org\//])).toBe(true);
     expect(isWorkletPackage('lodash', [/^@my-org\//])).toBe(false);
   });
@@ -492,6 +508,23 @@ describe('worklet-loader-mt (end-to-end)', () => {
       includeWorkletPackages: [/^@other\//],
     });
     expect(dropped).not.toContain('@org/motion');
+  });
+
+  it('follows a SUBPATH import of an allowlisted package (root reduction)', async () => {
+    // The specifier carries a subpath but the allowlist names the package root;
+    // checkpoint A must reduce the specifier to its root before matching, the
+    // same way the loader exclude reduces the resolved path.
+    const src = `import { animate } from '@org/motion/extras';\nexport const x = animate;`;
+    const resolve = {
+      '@org/motion/extras': '/project/node_modules/@org/motion/extras/index.js',
+    };
+
+    const followed = await runLoaderMT(src, {
+      resourcePath: '/project/src/App.ts',
+      resolve,
+      includeWorkletPackages: ['@org/motion'],
+    });
+    expect(followed).toContain(`import '@org/motion/extras';`);
   });
 
   it('skips a non-relative import the resolver rejects (does not fail)', async () => {

@@ -15,22 +15,19 @@ export function isUnderNodeModules(resolvedPath: string): boolean {
 }
 
 /**
- * Extract the package name (`name` or `@scope/name`) from a resolved path under
- * `node_modules`, or `null` when the path is not under `node_modules`. Lets a
- * resolved path be matched against the allowlist as a package specifier (see
- * {@link isWorkletPackage}).
+ * Reduce an import specifier to its package root: `@scope/name` or `name`,
+ * dropping any subpath. Returns `null` for input with no usable package
+ * segment (empty, or a bare `@scope` with no name).
  *
- * Uses the LAST `node_modules` segment so nested deps and pnpm's
- * `…/.pnpm/<pkg>@<v>/node_modules/<pkg>/…` layout both resolve correctly.
+ *   - `@my-org/foo/dist/x` → `@my-org/foo`
+ *   - `lodash/fp`          → `lodash`
+ *
+ * This is the canonical "package root" both worklet checkpoints reduce to
+ * before matching the allowlist, so a specifier and a resolved path always
+ * compare as the same input (see {@link isWorkletPackage}).
  */
-export function packageNameFromNodeModulesPath(
-  resolvedPath: string,
-): string | null {
-  const norm = resolvedPath.replace(/\\/g, '/');
-  const marker = '/node_modules/';
-  const idx = norm.lastIndexOf(marker);
-  if (idx === -1) return null;
-  const segments = norm.slice(idx + marker.length).split('/');
+export function packageRootFromSpecifier(specifier: string): string | null {
+  const segments = specifier.split('/');
   const first = segments[0];
   if (!first) return null;
   if (first.startsWith('@')) {
@@ -41,37 +38,55 @@ export function packageNameFromNodeModulesPath(
 }
 
 /**
- * Match a bare-import specifier against a single allowlist pattern.
+ * Extract the package root from a resolved path under `node_modules`, or `null`
+ * when the path is not under `node_modules`.
  *
- * Strings match exactly OR as a package-root prefix:
- *   - `@vue-lynx/motion-mini` matches `@vue-lynx/motion-mini` and
- *     `@vue-lynx/motion-mini/sub/path`, but NOT `@vue-lynx/motion-mini-x`.
- * RegExp patterns are tested against the full specifier.
+ * Uses the LAST `node_modules` segment so nested deps and pnpm's
+ * `…/.pnpm/<pkg>@<v>/node_modules/<pkg>/…` layout both resolve correctly, then
+ * reduces the remainder via {@link packageRootFromSpecifier}.
  */
-function specifierMatchesPattern(
-  specifier: string,
-  pattern: string | RegExp,
-): boolean {
-  if (pattern instanceof RegExp) return pattern.test(specifier);
-  if (specifier === pattern) return true;
-  return specifier.startsWith(pattern + '/');
+export function packageNameFromNodeModulesPath(
+  resolvedPath: string,
+): string | null {
+  const norm = resolvedPath.replace(/\\/g, '/');
+  const marker = '/node_modules/';
+  const idx = norm.lastIndexOf(marker);
+  if (idx === -1) return null;
+  return packageRootFromSpecifier(norm.slice(idx + marker.length));
 }
 
 /**
- * Whether `specifier` is covered by the `includeWorkletPackages` allowlist.
+ * Match a package root against a single allowlist pattern. Inputs are already
+ * reduced to a package root (see {@link packageRootFromSpecifier}), so:
+ *   - strings match exactly (`@org/motion` ≠ `@org/motion-x`), and
+ *   - RegExp patterns are tested against the root (`/^@org\//` matches
+ *     `@org/motion`).
+ */
+function matchesPattern(
+  packageRoot: string,
+  pattern: string | RegExp,
+): boolean {
+  return pattern instanceof RegExp
+    ? pattern.test(packageRoot)
+    : packageRoot === pattern;
+}
+
+/**
+ * Whether a package root is covered by the `includeWorkletPackages` allowlist.
  *
  * The single matcher used at both checkpoints — following import specifiers
  * ({@link extractLocalImports}) and the plugin's `node_modules` loader carve-out
- * — so both always match a package specifier, never a raw filesystem path.
+ * — both of which reduce their input to a package root first, so a specifier
+ * and a resolved path always compare as the same thing.
  *
  * @internal Exported for tests.
  */
 export function isWorkletPackage(
-  specifier: string,
+  packageRoot: string,
   allowlist: ReadonlyArray<string | RegExp>,
 ): boolean {
   for (const p of allowlist) {
-    if (specifierMatchesPattern(specifier, p)) return true;
+    if (matchesPattern(packageRoot, p)) return true;
   }
   return false;
 }
@@ -229,7 +244,11 @@ export async function extractLocalImports(
       kept.push(spec);
       continue;
     }
-    if (isWorkletPackage(spec, includeWorkletPackages)) kept.push(spec);
+    // Match the allowlist against the package ROOT (same input the plugin's
+    // loader carve-out derives from the resolved path), so a specifier and a
+    // path always compare as the same thing.
+    const root = packageRootFromSpecifier(spec);
+    if (root && isWorkletPackage(root, includeWorkletPackages)) kept.push(spec);
   }
 
   if (kept.length === 0) return '';
