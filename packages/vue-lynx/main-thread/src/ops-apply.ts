@@ -265,18 +265,11 @@ export function applyOps(ops: unknown[]): void {
         const tplId = ops[i++] as string;
         const holeCount = ops[i++] as number;
         const create = getTemplate(tplId);
+        let handles: LynxElement[];
         if (create) {
           // The create() function builds the whole lowered subtree with
           // straight-line PAPI calls and returns [root, hole0, hole1, …].
-          const handles = create(pageUniqueId);
-          const root = handles[0]!;
-          elements.set(rootId, root);
-          // NodesRef selector parity for the root (it is a vnode.el on the
-          // BG thread); interior nodes are anonymous by design.
-          __SetAttribute(root, `vue-ref-${rootId}`, 1);
-          for (let k = 1; k <= holeCount; k++) {
-            elements.set(rootId + k, handles[k] ?? root);
-          }
+          handles = create(pageUniqueId);
         } else {
           // Unregistered template (mismatched bundles / extraction failure).
           // Render an empty view placeholder so the rest of the tree
@@ -286,10 +279,15 @@ export function applyOps(ops: unknown[]): void {
           );
           const el = createTypedElement('view', pageUniqueId);
           __SetCSSId([el], 0);
-          elements.set(rootId, el);
-          for (let k = 1; k <= holeCount; k++) {
-            elements.set(rootId + k, el);
-          }
+          handles = [el];
+        }
+        const root = handles[0]!;
+        elements.set(rootId, root);
+        // NodesRef selector parity for the root (it is a vnode.el on the
+        // BG thread); interior nodes are anonymous by design.
+        __SetAttribute(root, `vue-ref-${rootId}`, 1);
+        for (let k = 1; k <= holeCount; k++) {
+          elements.set(rootId + k, handles[k] ?? root);
         }
         break;
       }

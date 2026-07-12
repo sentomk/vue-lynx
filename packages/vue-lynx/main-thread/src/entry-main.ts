@@ -13,6 +13,8 @@
  *   - globalThis.vuePatchUpdate – receives ops from Background Thread
  */
 
+import { PAGE_ROOT_ID, TPL_REGISTER_GLOBAL } from 'vue-lynx/internal/ops';
+
 import { elements, setPageUniqueId } from './element-registry.js';
 import { registerTemplate } from './element-templates.js';
 import { interceptPatchUpdate, runIfrRender } from './ifr.js';
@@ -44,7 +46,7 @@ g['runOnBackground'] = runOnBackground;
 //    at evaluation time — entry-main runs first, so they land in the
 //    create-only adapter
 g['__vueLynxRegisterTemplate'] = registerTemplate;
-g['__vueLynxRegisterElementTemplate'] = (
+g[TPL_REGISTER_GLOBAL] = (
   id: string,
   _holes: unknown,
   create: Parameters<typeof registerTemplate>[1],
@@ -58,9 +60,6 @@ g['__vueLynxRegisterElementTemplate'] = (
 //   globalThis.runWorklet, globalThis.registerWorkletInternal,
 //   globalThis.lynxWorkletImpl (with Element class, Animation, etc.)
 
-/** PAGE_ROOT_ID must match the value in runtime/src/shadow-element.ts */
-const PAGE_ROOT_ID = 1;
-
 // Lynx Lepus runtime requires globalThis.processData to be set.
 // It is called to transform initial data before renderPage runs.
 // For Vue we have no data processors, so just pass data through.
@@ -71,7 +70,7 @@ g['processData'] = function(data: unknown, _processorName?: string): unknown {
 // Lynx calls renderPage on the Main Thread first (before Background JS runs).
 // We create the root page element and store it as id=1 so Background ops that
 // target the root can resolve it correctly.
-g['renderPage'] = function(data: unknown): void {
+g['renderPage'] = function(_data: unknown): void {
   // Clear all element state from the previous page. This is essential for:
   // 1. Testing: prevents duplicate batch detection from skipping ops
   //    when ShadowElement IDs restart from 2 between test renders.
@@ -87,7 +86,7 @@ g['renderPage'] = function(data: unknown): void {
   // paint the first frame synchronously.  No-op in non-IFR bundles (user
   // code on the MT layer is stripped to worklet registrations, so no app
   // ever registers).
-  runIfrRender(data);
+  runIfrRender();
   __FlushElementTree(page);
 };
 

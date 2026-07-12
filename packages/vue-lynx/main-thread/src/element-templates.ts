@@ -35,8 +35,3 @@ export function registerTemplate(id: string, create: CreateFn): void {
 export function getTemplate(id: string): CreateFn | undefined {
   return templates.get(id);
 }
-
-/** Reset registry — for testing only. */
-export function resetTemplatesForTesting(): void {
-  templates.clear();
-}

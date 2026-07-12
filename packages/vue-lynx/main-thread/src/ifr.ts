@@ -35,43 +35,20 @@
  * BG side stamps `_execId` (required for `runOnBackground`).
  */
 
-import { OP } from 'vue-lynx/internal/ops';
+import { OP, OP_ARITY, PAGE_ROOT_ID } from 'vue-lynx/internal/ops';
 
 import { elements } from './element-registry.js';
 import { applyOps } from './ops-apply.js';
 
-/** Must match PAGE_ROOT_ID in runtime/src/shadow-element.ts. */
-const PAGE_ROOT_ID = 1;
+// Widened view: op codes read off the wire are plain numbers and may be
+// unknown to this build (forward compat) — lookups must yield undefined.
+const ARITY = OP_ARITY as Record<number, number | undefined>;
 
 type Phase = 'inactive' | 'enabled' | 'rendered' | 'hydrated';
 
 let phase: Phase = 'inactive';
 let recordedBatches: unknown[][] = [];
 let batchCursor = 0;
-
-// ---------------------------------------------------------------------------
-// Op-frame walking
-// ---------------------------------------------------------------------------
-
-/** Number of arguments following each opcode in the flat ops array. */
-const OP_ARITY: Record<number, number> = {
-  [OP.CREATE]: 2, // id, type
-  [OP.CREATE_TEXT]: 1, // id
-  [OP.INSERT]: 3, // parentId, childId, anchorId
-  [OP.REMOVE]: 2, // parentId, childId
-  [OP.SET_PROP]: 3, // id, key, value
-  [OP.SET_TEXT]: 2, // id, text
-  [OP.SET_EVENT]: 4, // id, eventType, eventName, sign
-  [OP.REMOVE_EVENT]: 3, // id, eventType, eventName
-  [OP.SET_STYLE]: 2, // id, styleObject
-  [OP.SET_CLASS]: 2, // id, classString
-  [OP.SET_ID]: 2, // id, idString
-  [OP.SET_WORKLET_EVENT]: 4, // id, eventType, eventName, workletCtx
-  [OP.SET_MT_REF]: 2, // id, refImpl
-  [OP.INIT_MT_REF]: 2, // wvid, initValue
-  [OP.SET_SCOPE_ID]: 2, // id, cssId
-  [OP.INSTANTIATE_TEMPLATE]: 3, // rootId, tplId, holeCount
-};
 
 /**
  * How a mismatch in the *last* argument of an op is handled during
@@ -95,11 +72,38 @@ const VALUE_OP: Record<number, 'patch' | 'always'> = {
   [OP.INIT_MT_REF]: 'always',
 };
 
+/**
+ * Deep equality over JSON-shaped values (ops are JSON-serializable by
+ * construction — they cross the thread boundary as JSON). A structural walk
+ * avoids the string allocations a stringify-compare would pay per op on the
+ * hydration path.
+ */
 function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
-  // Ops are JSON-serializable by construction (they cross the thread
-  // boundary as JSON), so stringify comparison is a faithful deep-equal.
-  return JSON.stringify(a) === JSON.stringify(b);
+  if (
+    typeof a !== 'object' || typeof b !== 'object' || a === null || b === null
+  ) {
+    return false;
+  }
+  const aArr = Array.isArray(a);
+  if (aArr !== Array.isArray(b)) return false;
+  if (aArr) {
+    const bArrV = b as unknown[];
+    const aArrV = a as unknown[];
+    if (aArrV.length !== bArrV.length) return false;
+    for (let i = 0; i < aArrV.length; i++) {
+      if (!sameValue(aArrV[i], bArrV[i])) return false;
+    }
+    return true;
+  }
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const aKeys = Object.keys(aObj);
+  if (aKeys.length !== Object.keys(bObj).length) return false;
+  for (const k of aKeys) {
+    if (!sameValue(aObj[k], bObj[k])) return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +152,7 @@ function recordAndApply(ops: unknown[]): void {
  * after the page root element is created.  No-op unless {@link enableIFR}
  * ran and user code registered an app on this thread.
  */
-export function runIfrRender(_data: unknown): void {
+export function runIfrRender(): void {
   if (phase === 'inactive') return;
 
   // renderPage may fire again in the same context (test envs, reload paths);
@@ -184,8 +188,14 @@ export function runIfrRender(_data: unknown): void {
 /**
  * Hydration entry point.  Called from `vuePatchUpdate` with the raw JSON
  * string before it is parsed/applied.  Returns `true` when the batch was
- * consumed by hydration (already applied during IFR, possibly with value
- * patches); `false` when the caller should apply it normally.
+ * consumed by hydration — skipped as already applied during IFR, value-level
+ * differences patched in, or (on structural mismatch) the IFR tree torn down
+ * and the background batch applied onto the clean page.  Returns `false`
+ * when hydration is over and the caller should apply the batch normally.
+ *
+ * When both threads ran identical deterministic code, reconciliation walks
+ * the identical streams and produces zero patch ops — the batch is already
+ * on screen.
  */
 export function interceptPatchUpdate(data: string): boolean {
   if (phase !== 'rendered') return false;
@@ -196,15 +206,6 @@ export function interceptPatchUpdate(data: string): boolean {
   }
 
   const recorded = recordedBatches[batchCursor]!;
-
-  // Fast path: both threads ran identical deterministic code, so the JSON
-  // payload the background thread produced is byte-for-byte the batch we
-  // recorded.  Nothing to do — it is already on screen.
-  if (JSON.stringify(recorded) === data) {
-    advanceCursor();
-    return true;
-  }
-
   const incoming = JSON.parse(data) as unknown[];
   const patchOps = reconcileBatch(recorded, incoming);
   if (patchOps) {
@@ -214,8 +215,8 @@ export function interceptPatchUpdate(data: string): boolean {
   }
 
   // Structural mismatch — the renders diverged (non-deterministic render or
-  // thread-dependent branching).  Remove the IFR tree and let the caller
-  // apply the background batch onto a clean page.
+  // thread-dependent branching).  Remove the IFR tree and apply the
+  // background batch onto the clean page.
   if (__DEV__) {
     console.warn(
       '[vue-lynx] IFR hydration mismatch: the background render differs '
@@ -226,12 +227,19 @@ export function interceptPatchUpdate(data: string): boolean {
   }
   teardownIfrTree();
   phase = 'hydrated';
-  return false;
+  applyOps(incoming);
+  return true;
 }
 
 function advanceCursor(): void {
   batchCursor++;
-  if (batchCursor >= recordedBatches.length) phase = 'hydrated';
+  if (batchCursor >= recordedBatches.length) {
+    phase = 'hydrated';
+    // The recorded first-screen stream has served its purpose — release it
+    // (it pins every type/class/style payload of the first screen otherwise).
+    recordedBatches = [];
+    batchCursor = 0;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +270,7 @@ function reconcileBatch(
   while (ri < recorded.length && ii < incoming.length) {
     const code = recorded[ri] as number;
     if (incoming[ii] !== code) return null;
-    const arity = OP_ARITY[code];
+    const arity = ARITY[code];
     if (arity === undefined) return null; // unknown op — cannot walk safely
     if (ri + arity >= recorded.length || ii + arity >= incoming.length) {
       // Truncated frame on either side.
@@ -313,7 +321,7 @@ function teardownIfrTree(): void {
     let i = 0;
     while (i < batch.length) {
       const code = batch[i] as number;
-      const arity = OP_ARITY[code];
+      const arity = ARITY[code];
       if (arity === undefined) break; // unknown op — stop scanning this batch
       if (code === OP.CREATE || code === OP.CREATE_TEXT) {
         createdIds.add(batch[i + 1] as number);

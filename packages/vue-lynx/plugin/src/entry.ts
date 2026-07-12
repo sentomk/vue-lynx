@@ -337,6 +337,11 @@ export function applyEntry(
     // exclude alone is insufficient (same reason as main-thread above).
     const runtimePkgDir = path.resolve(pkgRoot, 'runtime');
 
+    const workletMtOptions = {
+      ifr: opts.enableIFR ?? false,
+      elementTemplates: opts.enableElementTemplates ?? false,
+    };
+
     // Vue SFC on MT: vue-loader processes .vue on all layers (no issuerLayer
     // constraint). This enforce:'post' rule runs worklet-loader-mt AFTER
     // vue-loader, so it sees vue-loader's connector output (imports to
@@ -353,10 +358,7 @@ export function applyEntry(
       .test(/\.vue$/)
       .use('worklet-loader-mt')
       .loader(path.resolve(_dirname, './loaders/worklet-loader-mt'))
-      .options({
-        ifr: opts.enableIFR ?? false,
-        elementTemplates: opts.enableElementTemplates ?? false,
-      })
+      .options(workletMtOptions)
       .end();
 
     // JS/TS on MT: LEPUS worklet transform (extract registerWorkletInternal calls).
@@ -376,10 +378,7 @@ export function applyEntry(
     workletMtExclude.end()
       .use('worklet-loader-mt')
       .loader(path.resolve(_dirname, './loaders/worklet-loader-mt'))
-      .options({
-        ifr: opts.enableIFR ?? false,
-        elementTemplates: opts.enableElementTemplates ?? false,
-      })
+      .options(workletMtOptions)
       .end();
   });
 

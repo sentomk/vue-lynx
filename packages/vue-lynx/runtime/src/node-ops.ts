@@ -7,7 +7,7 @@ import type { RendererOptions } from '@vue/runtime-core';
 import {
   TPL_HOLE_PREFIX,
   TPL_TYPE_PREFIX,
-  getElementTemplateMeta,
+  getElementTemplateHoles,
 } from './element-template.js';
 import { register, unregister, updateHandler } from './event-registry.js';
 import { scheduleFlush } from './flush.js';
@@ -169,9 +169,9 @@ export function resolveClass(el: ShadowElement): string {
  */
 function createTemplateInstance(type: string): ShadowElement {
   const tplId = type.slice(TPL_TYPE_PREFIX.length);
-  const meta = getElementTemplateMeta(tplId);
+  const holeKeys = getElementTemplateHoles(tplId);
   const el = new ShadowElement(type);
-  if (!meta) {
+  if (!holeKeys) {
     // Unregistered template (should not happen — registration is hoisted in
     // the same module as the render fn). Degrade to an empty view so the
     // surrounding tree still renders.
@@ -185,21 +185,19 @@ function createTemplateInstance(type: string): ShadowElement {
     return el;
   }
   const holes: ShadowElement[] = [];
-  for (const _ of meta.holes) {
+  for (const _ of holeKeys) {
     holes.push(new ShadowElement('#tpl-hole'));
   }
-  el._tplMeta = meta;
+  el._tplHoleKeys = holeKeys;
   el._tplHoles = holes;
-  pushOp(OP.INSTANTIATE_TEMPLATE, el.id, tplId, meta.holes.length);
+  pushOp(OP.INSTANTIATE_TEMPLATE, el.id, tplId, holeKeys.length);
   scheduleFlush();
   return el;
 }
 
 export const nodeOps: RendererOptions<ShadowElement, ShadowElement> = {
   createElement(type: string): ShadowElement {
-    if (
-      type.charCodeAt(0) === 95 /* '_' */ && type.startsWith(TPL_TYPE_PREFIX)
-    ) {
+    if (type.startsWith(TPL_TYPE_PREFIX)) {
       return createTemplateInstance(type);
     }
     const el = new ShadowElement(type);
@@ -314,7 +312,7 @@ export const nodeOps: RendererOptions<ShadowElement, ShadowElement> = {
     // ------------------------------------------------------------------
     if (el._tplHoles !== undefined && key.startsWith(TPL_HOLE_PREFIX)) {
       const idx = Number(key.slice(TPL_HOLE_PREFIX.length));
-      const holeKey = el._tplMeta!.holes[idx];
+      const holeKey = el._tplHoleKeys?.[idx];
       const holeEl = el._tplHoles[idx];
       if (holeKey !== undefined && holeEl !== undefined) {
         if (holeKey === '#text') {

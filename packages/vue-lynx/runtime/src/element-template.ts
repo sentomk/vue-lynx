@@ -35,27 +35,24 @@
  * entry-main installs a create-only adapter for that case.
  */
 
-/**
- * Hole descriptor: the original prop key on the interior node, or the
- * special key `'#text'` for a text-content binding.
- */
-export type ElementTemplateHole = string;
+import {
+  TPL_HOLE_PREFIX,
+  TPL_REGISTER_GLOBAL,
+  TPL_TYPE_PREFIX,
+} from 'vue-lynx/internal/ops';
 
-/** create(pageUniqueId, refIdBase) → [root, hole0, hole1, …] native handles */
+export { TPL_HOLE_PREFIX, TPL_TYPE_PREFIX };
+
+/** create(pageUniqueId) → [root, hole0, hole1, …] native handles */
 export type ElementTemplateCreate = (
   pageUniqueId: number,
 ) => unknown[];
 
-export interface ElementTemplateMeta {
-  holes: ElementTemplateHole[];
-}
-
-/** Type-string prefix for lowered template vnodes. */
-export const TPL_TYPE_PREFIX = '__vlx-tpl:';
-/** Prop-key prefix for hole bindings on lowered vnodes. */
-export const TPL_HOLE_PREFIX = '__h';
-
-const templateMeta = new Map<string, ElementTemplateMeta>();
+/**
+ * Template id → hole keys: the original prop key on each interior node, or
+ * the special key `'#text'` for a text-content binding.
+ */
+const templateHoles = new Map<string, string[]>();
 
 /**
  * Register an element template. Called from compiler-generated code (hoisted
@@ -69,11 +66,11 @@ const templateMeta = new Map<string, ElementTemplateMeta>();
  */
 export function registerElementTemplate(
   id: string,
-  holes: ElementTemplateHole[],
+  holes: string[],
   create: ElementTemplateCreate,
 ): string {
-  if (!templateMeta.has(id)) {
-    templateMeta.set(id, { holes });
+  if (!templateHoles.has(id)) {
+    templateHoles.set(id, holes);
   }
   // Main-thread executor registry (present on the Lynx main thread — both
   // IFR and interpreter-only bundles; absent on the background thread).
@@ -85,20 +82,14 @@ export function registerElementTemplate(
 }
 
 /** @internal */
-export function getElementTemplateMeta(
-  id: string,
-): ElementTemplateMeta | undefined {
-  return templateMeta.get(id);
+export function getElementTemplateHoles(id: string): string[] | undefined {
+  return templateHoles.get(id);
 }
 
 // Install the registration global for compiler-generated code. Evaluated
 // before any user render module (they import 'vue-lynx' first). On the IFR
 // main thread this deliberately overwrites entry-main's create-only adapter
-// with the full registration (meta + forward to the executor registry).
-(globalThis as Record<string, unknown>)['__vueLynxRegisterElementTemplate'] =
+// with the full registration (hole metadata + forward to the executor
+// registry).
+(globalThis as Record<string, unknown>)[TPL_REGISTER_GLOBAL] =
   registerElementTemplate;
-
-/** Reset registry — for testing only. @internal */
-export function resetElementTemplates(): void {
-  templateMeta.clear();
-}

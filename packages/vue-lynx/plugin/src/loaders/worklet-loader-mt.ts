@@ -58,6 +58,33 @@ interface WorkletLoaderMtOptions {
   elementTemplates?: boolean;
 }
 
+/** The LEPUS worklet transform with the flags every MT call site shares. */
+function runLepusTransform(
+  source: string,
+  filename: string,
+  pluginName: string,
+): ReturnType<typeof transformReactLynxSync> {
+  return transformReactLynxSync(source, {
+    pluginName,
+    filename,
+    sourcemap: false,
+    cssScope: false,
+    shake: false,
+    compat: false,
+    refresh: false,
+    defineDCE: false,
+    directiveDCE: false,
+    worklet: {
+      target: 'LEPUS',
+      filename,
+      runtimePkg: 'vue-lynx',
+    },
+  });
+}
+
+const hasMainThreadDirective = (source: string): boolean =>
+  source.includes('\'main thread\'') || source.includes('"main thread"');
+
 export default function workletLoaderMT(
   this: Rspack.LoaderContext,
   source: string,
@@ -69,50 +96,38 @@ export default function workletLoaderMT(
     return ifrTransform(this, source);
   }
 
+  const keepTpl = options.elementTemplates === true;
+
+  // Preserve local (relative-path) imports so webpack follows the dependency
+  // graph to sub-modules that may contain worklet registrations.
+  const localImports = extractLocalImports(source, keepTpl);
+
+  // Hoisted element-template registrations: script-setup SFCs inline the
+  // compiled template into the script sub-module; non-script-setup SFCs
+  // carry them in the compiled template sub-module.
+  const tplRegistrations = keepTpl ? extractTemplateRegistrations(source) : '';
+
   // Vue script sub-modules: the inline match resource proxy re-exports
   // `export { default } from "...inline..."`. If we strip exports entirely,
   // the proxy fails with ESModulesLinkingError. Instead, emit local imports
   // + registrations + a dummy default export to satisfy the proxy. The
   // connector's side-effect import means the proxy's exports are unused
   // and will be tree-shaken.
-  const keepTpl = options.elementTemplates === true;
-
   if (
     this.resourceQuery?.includes('vue')
     && this.resourceQuery?.includes('type=script')
   ) {
-    const localImports = extractLocalImports(source, keepTpl);
-    // Script-setup SFCs inline the compiled template into the script module —
-    // the hoisted element-template registrations live here.
-    const tplRegistrations = keepTpl
-      ? extractTemplateRegistrations(source)
-      : '';
-
-    if (
-      !source.includes('\'main thread\'') && !source.includes('"main thread"')
-    ) {
+    if (!hasMainThreadDirective(source)) {
       return [localImports, tplRegistrations, 'export default {};']
         .filter(Boolean)
         .join('\n');
     }
 
-    const resourcePath = this.resourcePath;
-    const lepusResult = transformReactLynxSync(source, {
-      pluginName: 'vue:worklet-mt',
-      filename: resourcePath,
-      sourcemap: false,
-      cssScope: false,
-      shake: false,
-      compat: false,
-      refresh: false,
-      defineDCE: false,
-      directiveDCE: false,
-      worklet: {
-        target: 'LEPUS',
-        filename: resourcePath,
-        runtimePkg: 'vue-lynx',
-      },
-    });
+    const lepusResult = runLepusTransform(
+      source,
+      this.resourcePath,
+      'vue:worklet-mt',
+    );
 
     if (lepusResult.errors.length > 0) {
       for (const err of lepusResult.errors) {
@@ -140,44 +155,20 @@ export default function workletLoaderMT(
   // Regular .js/.ts files (not vue sub-modules):
   // Strip everything except local imports, shared imports, and registrations.
 
-  // Preserve local (relative-path) imports so webpack follows the dependency
-  // graph to sub-modules that may contain worklet registrations.
-  const localImports = extractLocalImports(source, keepTpl);
-
-  // Compiled template sub-modules (non-script-setup SFCs) carry the hoisted
-  // element-template registrations.
-  const tplRegistrations = keepTpl ? extractTemplateRegistrations(source) : '';
-
   // Quick check: skip LEPUS transform for files without 'main thread' directive
   // (but still extract shared imports from source since they don't need LEPUS)
-  if (
-    !source.includes('\'main thread\'') && !source.includes('"main thread"')
-  ) {
+  if (!hasMainThreadDirective(source)) {
     const sharedImports = extractSharedImports(source);
     return [sharedImports, localImports, tplRegistrations]
       .filter(Boolean)
       .join('\n');
   }
 
-  const resourcePath = this.resourcePath;
-  const filename = resourcePath;
-
-  const lepusResult = transformReactLynxSync(source, {
-    pluginName: 'vue:worklet-mt',
-    filename,
-    sourcemap: false,
-    cssScope: false,
-    shake: false,
-    compat: false,
-    refresh: false,
-    defineDCE: false,
-    directiveDCE: false,
-    worklet: {
-      target: 'LEPUS',
-      filename,
-      runtimePkg: 'vue-lynx',
-    },
-  });
+  const lepusResult = runLepusTransform(
+    source,
+    this.resourcePath,
+    'vue:worklet-mt',
+  );
 
   if (lepusResult.errors.length > 0) {
     for (const err of lepusResult.errors) {
@@ -229,32 +220,18 @@ function ifrTransform(
     return stripStyleImports(source);
   }
 
-  if (
-    !source.includes('\'main thread\'') && !source.includes('"main thread"')
-  ) {
+  if (!hasMainThreadDirective(source)) {
     return stripSharedImportAttributes(source);
   }
 
   // Transform the ORIGINAL source (not a pre-processed copy) so the content
   // hash in _wkltId matches the BG layer's JS-target transform of the same
   // content.
-  const resourcePath = ctx.resourcePath;
-  const lepusResult = transformReactLynxSync(source, {
-    pluginName: 'vue:worklet-mt-ifr',
-    filename: resourcePath,
-    sourcemap: false,
-    cssScope: false,
-    shake: false,
-    compat: false,
-    refresh: false,
-    defineDCE: false,
-    directiveDCE: false,
-    worklet: {
-      target: 'LEPUS',
-      filename: resourcePath,
-      runtimePkg: 'vue-lynx',
-    },
-  });
+  const lepusResult = runLepusTransform(
+    source,
+    ctx.resourcePath,
+    'vue:worklet-mt-ifr',
+  );
 
   if (lepusResult.errors.length > 0) {
     for (const err of lepusResult.errors) {

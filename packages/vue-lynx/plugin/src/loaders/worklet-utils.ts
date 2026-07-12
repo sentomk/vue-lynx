@@ -2,6 +2,8 @@
 // Licensed under the Apache License Version 2.0 that can be found in the
 // LICENSE file in the root directory of this source tree.
 
+import { TPL_REGISTER_GLOBAL } from 'vue-lynx/internal/ops';
+
 /**
  * Extract import statements that reference relative (local) paths.
  *
@@ -108,6 +110,9 @@ export function extractSharedImports(source: string): string {
  * reach the bundler's parser.
  */
 export function stripSharedImportAttributes(code: string): string {
+  // Cheap prefilter: virtually no module carries the attribute, and the
+  // backtracking regex below is run on every MT-layer module in IFR builds.
+  if (!code.includes('runtime:')) return code;
   return code.replace(
     /(import\s+.+?\s+from\s+(['"])[^'"]+\2)\s*with\s*\{[\s\S]*?runtime:\s*['"]shared['"][\s\S]*?\}\s*;?/g,
     '$1;',
@@ -157,7 +162,7 @@ export function stripStyleImports(code: string): string {
  * are re-emitted verbatim.
  */
 export function extractTemplateRegistrations(source: string): string {
-  const marker = 'globalThis.__vueLynxRegisterElementTemplate';
+  const marker = `globalThis.${TPL_REGISTER_GLOBAL}`;
   const out: string[] = [];
   let searchFrom = 0;
   while (true) {
@@ -185,12 +190,26 @@ export function extractTemplateRegistrations(source: string): string {
   return out.join('\n');
 }
 
-/** Given the index of a '(' in `code`, return the index of its matching ')'. */
+/**
+ * Given the index of a '(' in `code`, return the index of its matching ')'.
+ *
+ * String/template literals are skipped so parens inside embedded text (e.g.
+ * a baked `__SetAttribute(e, 'text', "call us :)")`) don't unbalance the
+ * scan. Comments are not handled — the scanned sources are compiler output,
+ * which never embeds parens in comments between call arguments.
+ */
 function findBalancedEnd(code: string, openIndex: number): number {
   let depth = 0;
   for (let i = openIndex; i < code.length; i++) {
-    if (code[i] === '(') depth++;
-    else if (code[i] === ')') {
+    const ch = code[i];
+    if (ch === '"' || ch === '\'' || ch === '`') {
+      for (i++; i < code.length; i++) {
+        if (code[i] === '\\') i++;
+        else if (code[i] === ch) break;
+      }
+    } else if (ch === '(') {
+      depth++;
+    } else if (ch === ')') {
       depth--;
       if (depth === 0) return i;
     }
@@ -219,19 +238,12 @@ export function extractRegistrations(lepusCode: string): string {
     const idx = lepusCode.indexOf(marker, searchFrom);
     if (idx === -1) break;
 
-    // Find the end of the registerWorkletInternal(...) call using bracket counting
-    let depth = 0;
-    let i = idx + marker.length - 1; // position of the opening '('
-    for (; i < lepusCode.length; i++) {
-      if (lepusCode[i] === '(') depth++;
-      else if (lepusCode[i] === ')') {
-        depth--;
-        if (depth === 0) break;
-      }
-    }
+    // Find the end of the registerWorkletInternal(...) call.
+    const close = findBalancedEnd(lepusCode, idx + marker.length - 1);
+    if (close === -1) break;
 
     // Extract the full call including trailing semicolon
-    let end = i + 1;
+    let end = close + 1;
     if (end < lepusCode.length && lepusCode[end] === ';') end++;
 
     registrations.push(lepusCode.slice(idx, end));

@@ -59,6 +59,13 @@ import {
   createSimpleExpression,
 } from '@vue/compiler-core';
 
+import {
+  TPL_HOLE_PREFIX,
+  TPL_REGISTER_GLOBAL,
+  TPL_TYPE_PREFIX,
+  scopeIdToCssId,
+} from 'vue-lynx/internal/ops';
+
 /**
  * Registration entry point referenced by the generated code.
  *
@@ -71,10 +78,7 @@ import {
  * bundles); interpreter-only MT bundles rebind the extracted registrations
  * to the executor registry (see worklet-utils extractTemplateRegistrations).
  */
-const REGISTER_GLOBAL = 'globalThis.__vueLynxRegisterElementTemplate';
-
-const TPL_TYPE_PREFIX = '__vlx-tpl:';
-const TPL_HOLE_PREFIX = '__h';
+const REGISTER_GLOBAL = `globalThis.${TPL_REGISTER_GLOBAL}`;
 
 /** Minimum element count for lowering to pay off (root + ≥1 interior). */
 const MIN_ELEMENTS = 2;
@@ -113,12 +117,6 @@ function templateId(content: string): string {
     fnv1a(content, 0x811c9dc5).toString(36)
     + fnv1a(content, 0x9747b28c).toString(36)
   );
-}
-
-/** Same algorithm as runtime/src/scope-bridge.ts scopeIdToCssId. */
-function scopeIdToCssId(scopeId: string): number {
-  const hex = scopeId.replace(/^data-v-/, '');
-  return Number.parseInt(hex, 16) & 0x7fffffff;
 }
 
 // ---------------------------------------------------------------------------
@@ -346,33 +344,18 @@ function analyzeSubtree(
 // Lowering (codegenNode mutation + hoisted registration)
 // ---------------------------------------------------------------------------
 
-const SEEN_IDS: unique symbol = Symbol('vlxTplSeen');
-
 function lowerElement(
   el: ElementNode,
   plan: TemplatePlan,
   context: TransformContext,
-): boolean {
+  seen: Set<string>,
+): void {
   const cg = el.codegenNode as VNodeCall;
-
-  // Root props must be a plain object expression (or absent) so hole props
-  // can be merged statically.
-  if (
-    cg.props != null && cg.props.type !== NodeTypes.JS_OBJECT_EXPRESSION
-  ) {
-    return false;
-  }
 
   const holeKeys = plan.holes.map((h) => h.key);
   const id = templateId(`${plan.src} ${holeKeys.join(',')}`);
 
   // Hoist the registration once per (module, template id).
-  const ctxAny = context as unknown as Record<PropertyKey, unknown>;
-  let seen = ctxAny[SEEN_IDS] as Set<string> | undefined;
-  if (!seen) {
-    seen = new Set();
-    ctxAny[SEEN_IDS] = seen;
-  }
   if (!seen.has(id)) {
     seen.add(id);
     const registration = createSimpleExpression(
@@ -419,41 +402,52 @@ function lowerElement(
     // biome-ignore lint/suspicious/noExplicitAny: dynamicProps is a stringified array in the AST
     cg.dynamicProps = JSON.stringify(dyn) as any;
   }
-
-  return true;
 }
 
 // ---------------------------------------------------------------------------
 // Tree walk
 // ---------------------------------------------------------------------------
 
+/**
+ * Root props must be a plain object expression (or absent) so hole props can
+ * be merged statically. Checked before analyzeSubtree — it is O(1) and its
+ * failure would discard the whole generated create() source.
+ */
+function isLowerableRoot(el: ElementNode): boolean {
+  const cg = el.codegenNode;
+  if (!cg || cg.type !== NodeTypes.VNODE_CALL) return false;
+  const props = (cg as VNodeCall).props;
+  return props == null || props.type === NodeTypes.JS_OBJECT_EXPRESSION;
+}
+
 function walk(
   children: TemplateChildNode[],
   context: TransformContext,
+  seen: Set<string>,
 ): void {
   for (const child of children) {
     switch (child.type) {
       case NodeTypes.ELEMENT: {
         const el = child as ElementNode;
-        if (el.tagType === ElementTypes.ELEMENT) {
+        if (el.tagType === ElementTypes.ELEMENT && isLowerableRoot(el)) {
           const plan = analyzeSubtree(el, context);
-          if (
-            plan && plan.elementCount >= MIN_ELEMENTS
-            && lowerElement(el, plan, context)
-          ) {
+          if (plan && plan.elementCount >= MIN_ELEMENTS) {
+            lowerElement(el, plan, context, seen);
             continue; // fully lowered — nothing left inside
           }
         }
-        walk(el.children, context);
+        walk(el.children, context, seen);
         break;
       }
       case NodeTypes.IF: {
-        for (const branch of child.branches) walk(branch.children, context);
+        for (const branch of child.branches) {
+          walk(branch.children, context, seen);
+        }
         break;
       }
       case NodeTypes.IF_BRANCH:
       case NodeTypes.FOR: {
-        walk(child.children, context);
+        walk(child.children, context, seen);
         break;
       }
       default:
@@ -471,6 +465,8 @@ function walk(
 export const elementTemplateTransform: NodeTransform = (node, context) => {
   if (node.type !== NodeTypes.ROOT) return;
   return () => {
-    walk((node as RootNode).children, context);
+    // Dedups hoisted registrations per compilation.
+    const seen = new Set<string>();
+    walk((node as RootNode).children, context, seen);
   };
 };
