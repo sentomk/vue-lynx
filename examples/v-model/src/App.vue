@@ -33,7 +33,7 @@ const inputText = ref('')
 //  4b. v-model + @input on the same element — vModelText injects its handler
 //      into vnode.props during `created` so patchProp registers a SINGLE merged
 //      PAPI listener; otherwise the two listeners overwrite each other.
-const presetText = ref('写点啥呀！')
+const presetText = ref('Preset draft')
 
 const coexistText = ref('')
 const inputEvents = ref(0)
@@ -119,7 +119,7 @@ function fillPreset() {
     <text :style="{ fontSize: 12, color: '#666', marginBottom: 4 }">
       4a. Preset: "{{ presetText }}"
     </text>
-    <input v-model="presetText" type="text" placeholder="(should not be empty)"
+    <input v-model="presetText" type="text" placeholder="Preset value"
       :style="{ padding: 8, borderRadius: 4, fontSize: 14, backgroundColor: '#fff', marginBottom: 4 }" />
     <view :style="{ flexDirection: 'row', gap: 8, marginBottom: 12 }">
       <view :style="{ padding: '4px 10px', backgroundColor: '#555', borderRadius: 4, alignSelf: 'flex-start' }" @tap="clearPreset">
@@ -142,6 +142,10 @@ function fillPreset() {
          for `input` → `x-input` but none for `textarea`). It renders as a bare
          HTML <textarea> with no Lynx event bridge, so v-model silently no-ops
          there. Use <input> on web; the directive itself supports both. -->
+
+    <!-- Bottom spacer: keeps the lower inputs scrollable above the soft
+         keyboard so a focused field is never trapped behind it. -->
+    <view :style="{ height: 320 }" />
 
   </scroll-view>
 </template>
