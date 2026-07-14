@@ -5,6 +5,7 @@ import {
   calculateBottomSpacer,
   calculateMessageLaunchDistance,
   isNearBottom,
+  nextWebBottomOffset,
   turnScrollMode,
 } from '../src/lib/chat-viewport';
 
@@ -68,6 +69,16 @@ describe('chat viewport geometry', () => {
     expect(turnScrollMode('web')).toBe('bottom');
     expect(turnScrollMode('iOS')).toBe('anchor');
     expect(turnScrollMode('Android')).toBe('anchor');
+  });
+
+  it('changes the Web bottom offset on every request so the observed attribute fires', () => {
+    const first = nextWebBottomOffset(0);
+    const second = nextWebBottomOffset(first);
+    const third = nextWebBottomOffset(second);
+
+    expect(first).toBe(1_000_000);
+    expect(second).toBe(999_999);
+    expect(third).toBe(1_000_000);
   });
 
   it('measures a visible Native launch from the composer toward the anchored turn', () => {

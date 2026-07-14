@@ -1,5 +1,6 @@
 const DEFAULT_NEAR_BOTTOM_THRESHOLD = 72;
 const NEW_TURN_TOP_GAP = 16;
+const WEB_BOTTOM_OFFSET = 1_000_000;
 
 interface ScrollMetrics {
   scrollTop: number;
@@ -57,6 +58,10 @@ export function calculateBottomSpacer(metrics: BottomSpacerMetrics): number {
 
 export function turnScrollMode(platform?: string): 'anchor' | 'bottom' {
   return platform === 'web' ? 'bottom' : 'anchor';
+}
+
+export function nextWebBottomOffset(current: number): number {
+  return current === WEB_BOTTOM_OFFSET ? WEB_BOTTOM_OFFSET - 1 : WEB_BOTTOM_OFFSET;
 }
 
 export function calculateMessageLaunchDistance(metrics: MessageLaunchMetrics): number {

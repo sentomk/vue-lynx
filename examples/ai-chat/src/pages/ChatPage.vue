@@ -25,6 +25,7 @@ import {
   calculateBottomSpacer,
   calculateMessageLaunchDistance,
   isNearBottom,
+  nextWebBottomOffset,
   turnScrollMode,
 } from '../lib/chat-viewport';
 import type { UIMessage } from '../types/ai';
@@ -114,6 +115,7 @@ const pendingAnimatedUserMessageId = ref<string | null>(null);
 const userMessageLaunchDistance = ref(0);
 const anchoredTurnHeight = ref(0);
 const followsOutput = ref(true);
+const webScrollOffset = ref<number>();
 const messageHeights = new Map<string, number>();
 let scrollTop = 0;
 let scrollHeight = 0;
@@ -150,6 +152,12 @@ const { messages, status, error, sendMessage, regenerate, stop } = chat;
 onUnmounted(stop);
 
 async function scrollToBottom(smooth = false) {
+  if (turnMode === 'bottom') {
+    webScrollOffset.value = nextWebBottomOffset(webScrollOffset.value ?? 0);
+    await nextTick();
+    return;
+  }
+
   // nextTick waits for the main thread to apply pending ops so the
   // scroll-view ref is resolvable by selector.
   await nextTick();
@@ -208,7 +216,7 @@ function beginAnchoredTurn(message: UIMessage | undefined, animateUser: boolean)
     animatedUserMessageId.value = animateUser ? message.id : null;
     userMessageLaunchDistance.value = 0;
     updateAnchoredTurnHeight();
-    void scrollToBottom(true);
+    void scrollToBottom();
     return;
   }
 
@@ -323,6 +331,16 @@ watch(status, async (value) => {
     title.value = updated.label;
   }
 });
+
+if (turnMode === 'bottom') {
+  watch(
+    messages,
+    () => {
+      if (followsOutput.value) void scrollToBottom();
+    },
+    { deep: true, flush: 'post' },
+  );
+}
 
 onMounted(async () => {
   try {
@@ -510,6 +528,7 @@ const bottomSpacerHeight = computed(() =>
     <scroll-view
       ref="scrollRef"
       scroll-orientation="vertical"
+      :scroll-top="webScrollOffset"
       :bounces="false"
       :scroll-bar-enable="false"
       class="flex-1 min-h-0"

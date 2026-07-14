@@ -22,18 +22,26 @@ describe('native-first chat motion', () => {
     expect(chatPage).toMatch(
       /v-for="message in messages"[\s\S]*?:style="userMessageLaunchStyle\(message\.id\)"[\s\S]*?@layoutchange/,
     );
-    expect(css).toMatch(/\.user-message-enter\s*{[^}]*500ms/s);
+    expect(css).toMatch(
+      /\.user-message-enter\s*{[^}]*500ms cubic-bezier\(0\.22, 1, 0\.36, 1\)/s,
+    );
     expect(css).toContain('var(--user-message-launch-distance)');
     expect(css).toMatch(/\.assistant-turn-enter\s*{[^}]*240ms[^}]*360ms/s);
+    expect(css).not.toMatch(/@keyframes user-message-enter[\s\S]*?70%/);
+    expect(css).not.toMatch(/@keyframes user-message-enter[\s\S]*?86%/);
   });
 
   it('falls back to bottom-follow scrolling for Web turns', async () => {
     const chatPage = await source('src/pages/ChatPage.vue');
 
     expect(chatPage).toContain('turnScrollMode');
+    expect(chatPage).toContain('nextWebBottomOffset');
     expect(chatPage).toContain("turnMode === 'bottom'");
     expect(chatPage).toMatch(/turnMode === 'bottom'[\s\S]*?anchoredMessageId\.value = null/);
-    expect(chatPage).toMatch(/turnMode === 'bottom'[\s\S]*?scrollToBottom\(true\)/);
+    expect(chatPage).toMatch(/turnMode === 'bottom'[\s\S]*?webScrollOffset\.value/);
+    expect(chatPage).toMatch(/watch\(\s*messages,[\s\S]*?scrollToBottom\(\)/);
+    expect(chatPage).toContain("{ deep: true, flush: 'post' }");
+    expect(chatPage).toContain(':scroll-top="webScrollOffset"');
     expect(chatPage).toMatch(
       /anchoredTurnHeight:\s*turnMode === 'anchor'[\s\S]*?anchoredTurnHeight\.value[\s\S]*?: undefined/,
     );

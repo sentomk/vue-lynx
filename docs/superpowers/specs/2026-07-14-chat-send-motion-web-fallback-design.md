@@ -7,7 +7,7 @@ Make a newly sent message feel visibly connected to the composer on Native, clea
 ## Platform behavior
 
 - Native keeps the existing anchored-turn layout. A newly submitted user bubble launches upward with a measured translation based on the viewport, composer, keyboard, and bubble heights. The assistant reveal waits until the user launch is substantially complete.
-- Web does not use the Native top-anchor spacer or `scrollIntoView`. It uses the conventional chat behavior: after a send and during followed streaming updates, the message list scrolls to the bottom.
+- Web does not use the Native top-anchor spacer or `scrollIntoView`. Lynx Web does not dispatch `contentsizechanged`, and its Background Thread UI-method bridge does not move this scroll view reliably, so followed message mutations toggle the Web element's observed `scroll-top` attribute. This keeps the list at the bottom after a send and throughout streaming.
 - Reduced-motion mode preserves the final layout and reduces all entrance animations to one millisecond.
 
 ## Input synchronization
@@ -16,7 +16,7 @@ Make a newly sent message feel visibly connected to the composer on Native, clea
 
 ## Motion calculation
 
-The launch distance is computed in a pure helper so it is testable. It approximates the distance between the bubble's anchored top position and the visible composer edge, clamps the result to a useful range, and returns zero for Web. `ChatPage` stores the measured bubble height and exposes the result as the `--user-message-launch-distance` custom property on the animated bubble.
+The launch distance is computed in a pure helper so it is testable. It approximates the distance between the bubble's anchored top position and the visible composer edge, clamps the result to a useful range, and returns zero for Web. `ChatPage` stores the measured bubble height and exposes the result as the `--user-message-launch-distance` custom property on the animated bubble. The transform follows a single monotonic ease-out path to the target; it deliberately has no overshoot or rebound.
 
 ## Verification
 

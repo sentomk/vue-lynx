@@ -64,7 +64,7 @@ Run the same command and expect all chat motion tests to pass.
 
 - [x] **Step 1: Write failing orchestration and CSS tests**
 
-Require Web turns to bypass `anchoredMessageId`, call `scrollToBottom`, and omit anchored spacer height. Require the user entrance to use `--user-message-launch-distance`, a 400–460 ms duration, and an assistant delay of at least 200 ms.
+Require Web turns to bypass `anchoredMessageId`, call `scrollToBottom`, and omit anchored spacer height. Require the user entrance to use `--user-message-launch-distance`, a 500 ms duration, and an assistant delay of at least 200 ms.
 
 - [x] **Step 2: Run the targeted test and verify RED**
 
@@ -72,11 +72,11 @@ Run `pnpm --filter @vue-lynx-example/ai-chat test -- tests/chat-motion.test.ts` 
 
 - [x] **Step 3: Implement the orchestration**
 
-Read `SystemInfo.platform`, calculate the measured Native launch style after message layout, preserve Native `scrollMessageToTop`, and route Web sends to `scrollToBottom(true)`. Pass no anchored turn height to Web spacer calculation.
+Read `SystemInfo.platform`, calculate the measured Native launch style after message layout, preserve Native `scrollMessageToTop`, and route Web sends and streaming mutations through the observed `scroll-top` attribute. Pass no anchored turn height to Web spacer calculation.
 
 - [x] **Step 4: Strengthen the signature animation**
 
-Animate the complete user-message unit from the measured translation with a spring-like scale and opacity change over 500 ms. Delay assistant content 360 ms and keep reduced-motion overrides intact.
+Animate the complete user-message unit from the measured translation with a monotonic ease-out scale and opacity change over 500 ms. Do not overshoot the target. Delay assistant content 360 ms and keep reduced-motion overrides intact.
 
 - [x] **Step 5: Run targeted tests and verify GREEN**
 
