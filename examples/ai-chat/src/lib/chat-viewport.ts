@@ -14,6 +14,14 @@ interface BottomSpacerMetrics {
   anchoredTurnHeight?: number;
 }
 
+interface MessageLaunchMetrics {
+  platform?: string;
+  viewportHeight: number;
+  composerHeight: number;
+  keyboardHeight: number;
+  messageHeight: number;
+}
+
 function positive(value: number): number {
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
@@ -45,4 +53,21 @@ export function calculateBottomSpacer(metrics: BottomSpacerMetrics): number {
       NEW_TURN_TOP_GAP,
   );
   return obstruction + blankSpace;
+}
+
+export function turnScrollMode(platform?: string): 'anchor' | 'bottom' {
+  return platform === 'web' ? 'bottom' : 'anchor';
+}
+
+export function calculateMessageLaunchDistance(metrics: MessageLaunchMetrics): number {
+  if (turnScrollMode(metrics.platform) === 'bottom') return 0;
+
+  const distance =
+    positive(metrics.viewportHeight) -
+    positive(metrics.composerHeight) -
+    positive(metrics.keyboardHeight) -
+    positive(metrics.messageHeight) -
+    NEW_TURN_TOP_GAP;
+
+  return Math.min(420, Math.max(44, distance));
 }

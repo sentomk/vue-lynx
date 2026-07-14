@@ -21,7 +21,12 @@ import { useOverlay } from '../composables/useOverlay';
 import { useToast } from '../composables/useToast';
 import { useViewport } from '../composables/useViewport';
 import { apiFetch } from '../lib/api';
-import { calculateBottomSpacer, isNearBottom } from '../lib/chat-viewport';
+import {
+  calculateBottomSpacer,
+  calculateMessageLaunchDistance,
+  isNearBottom,
+  turnScrollMode,
+} from '../lib/chat-viewport';
 import type { UIMessage } from '../types/ai';
 
 /** Port of app/pages/chat/[id].vue. */
@@ -56,6 +61,7 @@ interface Vote {
 const votes = ref<Vote[]>([]);
 
 const input = ref('');
+const inputResetKey = ref(0);
 const editingMessageId = ref<string | null>(null);
 
 const { files, open, removeFile, clearFiles, uploading, uploadedFiles } = useAttachments();
@@ -91,9 +97,10 @@ interface TouchLikeEvent {
 
 const systemInfo = (
   globalThis as {
-    SystemInfo?: { pixelHeight?: number; pixelRatio?: number };
+    SystemInfo?: { pixelHeight?: number; pixelRatio?: number; platform?: string };
   }
 ).SystemInfo;
+const turnMode = turnScrollMode(systemInfo?.platform);
 const initialViewportHeight = Math.max(
   0,
   (systemInfo?.pixelHeight ?? 720) / (systemInfo?.pixelRatio || 1) - 56,
@@ -103,6 +110,8 @@ const composerHeight = ref(112);
 const keyboardHeight = ref(0);
 const anchoredMessageId = ref<string | null>(null);
 const animatedUserMessageId = ref<string | null>(null);
+const pendingAnimatedUserMessageId = ref<string | null>(null);
+const userMessageLaunchDistance = ref(0);
 const anchoredTurnHeight = ref(0);
 const followsOutput = ref(true);
 const messageHeights = new Map<string, number>();
@@ -191,11 +200,35 @@ function updateAnchoredTurnHeight() {
 
 function beginAnchoredTurn(message: UIMessage | undefined, animateUser: boolean) {
   if (!message || message.role !== 'user') return;
-  anchoredMessageId.value = message.id;
-  animatedUserMessageId.value = animateUser ? message.id : null;
   followsOutput.value = true;
+
+  if (turnMode === 'bottom') {
+    anchoredMessageId.value = null;
+    pendingAnimatedUserMessageId.value = null;
+    animatedUserMessageId.value = animateUser ? message.id : null;
+    userMessageLaunchDistance.value = 0;
+    updateAnchoredTurnHeight();
+    void scrollToBottom(true);
+    return;
+  }
+
+  anchoredMessageId.value = message.id;
+  pendingAnimatedUserMessageId.value = animateUser ? message.id : null;
+  animatedUserMessageId.value = null;
   updateAnchoredTurnHeight();
   void scrollMessageToTop(message.id);
+}
+
+function userMessageLaunchStyle(messageId: string) {
+  if (
+    messageId !== animatedUserMessageId.value &&
+    messageId !== pendingAnimatedUserMessageId.value
+  ) {
+    return undefined;
+  }
+  return {
+    '--user-message-launch-distance': `${userMessageLaunchDistance.value}px`,
+  };
 }
 
 function isAssistantForAnimatedTurn(message: UIMessage) {
@@ -262,9 +295,22 @@ function handleComposerLayout(event: LayoutEvent) {
 
 function handleMessageLayout(messageId: string, event: LayoutEvent) {
   const height = Number(event.detail?.height);
-  if (!Number.isFinite(height) || height <= 0 || messageHeights.get(messageId) === height) return;
-  messageHeights.set(messageId, height);
-  updateAnchoredTurnHeight();
+  if (!Number.isFinite(height) || height <= 0) return;
+  if (messageHeights.get(messageId) !== height) {
+    messageHeights.set(messageId, height);
+    updateAnchoredTurnHeight();
+  }
+  if (pendingAnimatedUserMessageId.value !== messageId) return;
+
+  userMessageLaunchDistance.value = calculateMessageLaunchDistance({
+    platform: systemInfo?.platform,
+    viewportHeight: viewportHeight.value,
+    composerHeight: composerHeight.value,
+    keyboardHeight: keyboardHeight.value,
+    messageHeight: height,
+  });
+  pendingAnimatedUserMessageId.value = null;
+  animatedUserMessageId.value = messageId;
 }
 
 // The title is generated server-side before streaming starts on the first
@@ -309,7 +355,7 @@ onMounted(async () => {
   }
 });
 
-async function handleSubmit() {
+function handleSubmit() {
   if (input.value.trim() && !uploading.value) {
     const generation = sendMessage({
       text: input.value,
@@ -317,6 +363,7 @@ async function handleSubmit() {
     });
     beginAnchoredTurn(messages.value[messages.value.length - 1], true);
     input.value = '';
+    inputResetKey.value += 1;
     clearFiles();
     void generation;
   }
@@ -437,7 +484,8 @@ const bottomSpacerHeight = computed(() =>
     composerHeight: isOwner.value ? composerHeight.value : 0,
     keyboardHeight: isOwner.value ? keyboardHeight.value : 0,
     viewportHeight: viewportHeight.value,
-    anchoredTurnHeight: anchoredMessageId.value ? anchoredTurnHeight.value : undefined,
+    anchoredTurnHeight:
+      turnMode === 'anchor' && anchoredMessageId.value ? anchoredTurnHeight.value : undefined,
   }),
 );
 </script>
@@ -483,20 +531,23 @@ const bottomSpacerHeight = computed(() =>
             class="flex flex-col"
             :class="[
               message.role === 'user' ? 'items-end' : 'items-start',
+              message.role === 'user' && message.id === animatedUserMessageId
+                ? 'user-message-enter'
+                : message.role === 'user' && message.id === pendingAnimatedUserMessageId
+                  ? 'user-message-pending'
+                  : '',
               isAssistantForAnimatedTurn(message) ? 'assistant-turn-enter' : '',
             ]"
+            :style="userMessageLaunchStyle(message.id)"
             @layoutchange="(event) => handleMessageLayout(message.id, event)"
           >
             <!-- user bubble / assistant full width -->
             <view
-              :class="[
+              :class="
                 message.role === 'user'
                   ? 'bg-elevated rounded-lg px-4 py-3 user-bubble'
-                  : 'w-full',
-                message.role === 'user' && message.id === animatedUserMessageId
-                  ? 'user-message-enter'
-                  : '',
-              ]"
+                  : 'w-full'
+              "
             >
               <MessageContent
                 :message="message"
@@ -564,6 +615,7 @@ const bottomSpacerHeight = computed(() =>
         <PromptBox
           ref="promptBoxRef"
           v-model="input"
+          :reset-key="inputResetKey"
           :status="status"
           :disabled="uploading"
           @submit="handleSubmit"

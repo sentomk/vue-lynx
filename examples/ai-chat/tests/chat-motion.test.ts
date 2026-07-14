@@ -9,12 +9,34 @@ const source = (relativePath: string) =>
 describe('native-first chat motion', () => {
   it('orchestrates a newly submitted user bubble before the assistant reveal', async () => {
     const chatPage = await source('src/pages/ChatPage.vue');
+    const css = await source('src/App.css');
 
     expect(chatPage).toContain('animatedUserMessageId');
+    expect(chatPage).toContain('pendingAnimatedUserMessageId');
+    expect(chatPage).toContain('calculateMessageLaunchDistance');
+    expect(chatPage).toContain("'--user-message-launch-distance'");
     expect(chatPage).toContain("'user-message-enter'");
     expect(chatPage).toContain("'assistant-turn-enter'");
     expect(chatPage).toMatch(/beginAnchoredTurn\([^)]*,\s*true\)/);
     expect(chatPage).toMatch(/beginAnchoredTurn\([^)]*,\s*false\)/);
+    expect(chatPage).toMatch(
+      /v-for="message in messages"[\s\S]*?:style="userMessageLaunchStyle\(message\.id\)"[\s\S]*?@layoutchange/,
+    );
+    expect(css).toMatch(/\.user-message-enter\s*{[^}]*500ms/s);
+    expect(css).toContain('var(--user-message-launch-distance)');
+    expect(css).toMatch(/\.assistant-turn-enter\s*{[^}]*240ms[^}]*360ms/s);
+  });
+
+  it('falls back to bottom-follow scrolling for Web turns', async () => {
+    const chatPage = await source('src/pages/ChatPage.vue');
+
+    expect(chatPage).toContain('turnScrollMode');
+    expect(chatPage).toContain("turnMode === 'bottom'");
+    expect(chatPage).toMatch(/turnMode === 'bottom'[\s\S]*?anchoredMessageId\.value = null/);
+    expect(chatPage).toMatch(/turnMode === 'bottom'[\s\S]*?scrollToBottom\(true\)/);
+    expect(chatPage).toMatch(
+      /anchoredTurnHeight:\s*turnMode === 'anchor'[\s\S]*?anchoredTurnHeight\.value[\s\S]*?: undefined/,
+    );
   });
 
   it('reveals streamed semantic blocks without replaying loaded history', async () => {
@@ -77,6 +99,21 @@ describe('native-first chat motion', () => {
     expect(chatPage).toContain('promptBoxRef.value?.blur()');
     expect(chatPage).toContain(':bounces="false"');
     expect(chatPage).toContain(':scroll-bar-enable="false"');
+  });
+
+  it('clears both Vue and the Native textarea value after accepting a send', async () => {
+    const prompt = await source('src/components/chat/PromptBox.vue');
+    const chatPage = await source('src/pages/ChatPage.vue');
+
+    expect(prompt).toContain("import { setNativeInputValue } from '../../composables/useNativeInputValue'");
+    expect(prompt).toContain('resetKey?: number');
+    expect(prompt).toMatch(/watch\(\s*\(\) => props\.resetKey/);
+    expect(prompt).toContain("{ flush: 'post' }");
+    expect(prompt).toContain("setNativeInputValue(inputRef.value, '')");
+    expect(prompt).toContain('defineExpose({ blur: blurInput, focus: focusInput })');
+    expect(chatPage).toContain('const inputResetKey = ref(0)');
+    expect(chatPage).toMatch(/input\.value = '';\s*inputResetKey\.value \+= 1;/);
+    expect(chatPage).toContain(':reset-key="inputResetKey"');
   });
 
   it('provides reduced-motion fallbacks for every chat entrance animation', async () => {

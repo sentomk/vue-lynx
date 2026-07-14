@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, useTemplateRef } from 'vue-lynx';
+import { computed, useTemplateRef, watch } from 'vue-lynx';
 import type { ShadowElement } from 'vue-lynx';
 
+import { setNativeInputValue } from '../../composables/useNativeInputValue';
 import { inputEventValue } from '../../lib/input-event';
 import type { ChatStatus } from '../../types/ai';
 import ModelSelect from '../ModelSelect.vue';
@@ -20,6 +21,7 @@ const props = withDefaults(
     status?: ChatStatus;
     disabled?: boolean;
     placeholder?: string;
+    resetKey?: number;
   }>(),
   { status: 'ready', placeholder: 'Type your message here...' },
 );
@@ -63,6 +65,14 @@ function blurInput() {
 function focusInput() {
   invokeInput('focus');
 }
+
+watch(
+  () => props.resetKey,
+  () => {
+    if (!isWeb && inputRef.value) setNativeInputValue(inputRef.value, '');
+  },
+  { flush: 'post' },
+);
 
 defineExpose({ blur: blurInput, focus: focusInput });
 </script>

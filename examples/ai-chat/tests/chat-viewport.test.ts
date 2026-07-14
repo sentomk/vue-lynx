@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { bottomDistance, calculateBottomSpacer, isNearBottom } from '../src/lib/chat-viewport';
+import {
+  bottomDistance,
+  calculateBottomSpacer,
+  calculateMessageLaunchDistance,
+  isNearBottom,
+  turnScrollMode,
+} from '../src/lib/chat-viewport';
 
 describe('chat viewport geometry', () => {
   it('treats the user as near the bottom within a small tolerance', () => {
@@ -56,5 +62,50 @@ describe('chat viewport geometry', () => {
         anchoredTurnHeight: 640,
       }),
     ).toBe(404);
+  });
+
+  it('uses conventional bottom-follow scrolling on Web and top anchoring on Native', () => {
+    expect(turnScrollMode('web')).toBe('bottom');
+    expect(turnScrollMode('iOS')).toBe('anchor');
+    expect(turnScrollMode('Android')).toBe('anchor');
+  });
+
+  it('measures a visible Native launch from the composer toward the anchored turn', () => {
+    expect(
+      calculateMessageLaunchDistance({
+        platform: 'iOS',
+        viewportHeight: 760,
+        composerHeight: 112,
+        keyboardHeight: 300,
+        messageHeight: 72,
+      }),
+    ).toBe(260);
+    expect(
+      calculateMessageLaunchDistance({
+        platform: 'iOS',
+        viewportHeight: 1200,
+        composerHeight: 80,
+        keyboardHeight: 0,
+        messageHeight: 40,
+      }),
+    ).toBe(420);
+    expect(
+      calculateMessageLaunchDistance({
+        platform: 'Android',
+        viewportHeight: 240,
+        composerHeight: 160,
+        keyboardHeight: 80,
+        messageHeight: 72,
+      }),
+    ).toBe(44);
+    expect(
+      calculateMessageLaunchDistance({
+        platform: 'web',
+        viewportHeight: 760,
+        composerHeight: 112,
+        keyboardHeight: 0,
+        messageHeight: 72,
+      }),
+    ).toBe(0);
   });
 });
