@@ -5,16 +5,23 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { bindKeyboardAvoidance } from '../src/composables/useKeyboardAvoidance';
 import { setNativeInputValue } from '../src/composables/useNativeInputValue';
+import { inputEventValue } from '../src/lib/input-event';
+
+describe('cross-platform text input', () => {
+  it('reads both Lynx detail values and Web DOM target values', () => {
+    expect(inputEventValue({ detail: { value: 'native' } })).toBe('native');
+    expect(inputEventValue({ target: { value: 'web' } })).toBe('web');
+    expect(inputEventValue({ detail: 'legacy' })).toBe('legacy');
+  });
+});
 
 describe('native keyboard avoidance', () => {
   it('moves the composer by the keyboard height and restores it on close', () => {
     let listener: ((status: unknown, height: unknown) => void) | undefined;
     const emitter = {
-      addListener: vi.fn(
-        (_name: string, callback: (status: unknown, height: unknown) => void) => {
-          listener = callback;
-        },
-      ),
+      addListener: vi.fn((_name: string, callback: (status: unknown, height: unknown) => void) => {
+        listener = callback;
+      }),
       removeListener: vi.fn(),
     };
     const exec = vi.fn();
@@ -42,14 +49,35 @@ describe('native keyboard avoidance', () => {
     expect(emitter.removeListener).toHaveBeenCalledWith('keyboardstatuschanged', listener);
   });
 
+  it('reports keyboard obstruction changes so the message viewport can follow selectively', () => {
+    let listener: ((status: unknown, height: unknown) => void) | undefined;
+    const emitter = {
+      addListener: vi.fn((_name: string, callback: (status: unknown, height: unknown) => void) => {
+        listener = callback;
+      }),
+      removeListener: vi.fn(),
+    };
+    const onHeightChange = vi.fn();
+
+    bindKeyboardAvoidance(
+      emitter,
+      () => ({ setNativeProps: () => ({ exec: vi.fn() }) }),
+      onHeightChange,
+    );
+
+    listener?.('on', 320);
+    listener?.('off', 320);
+
+    expect(onHeightChange).toHaveBeenNthCalledWith(1, 320, 0);
+    expect(onHeightChange).toHaveBeenNthCalledWith(2, 0, 320);
+  });
+
   it('ignores invalid keyboard heights', () => {
     let listener: ((status: unknown, height: unknown) => void) | undefined;
     const emitter = {
-      addListener: vi.fn(
-        (_name: string, callback: (status: unknown, height: unknown) => void) => {
-          listener = callback;
-        },
-      ),
+      addListener: vi.fn((_name: string, callback: (status: unknown, height: unknown) => void) => {
+        listener = callback;
+      }),
       removeListener: vi.fn(),
     };
     const setNativeProps = vi.fn(() => ({ exec: vi.fn() }));
@@ -63,7 +91,7 @@ describe('native keyboard avoidance', () => {
     });
   });
 
-  it('anchors the chat composer to the bottom before translating it above the keyboard', async () => {
+  it('coordinates measured composer and scroll geometry instead of fixed padding', async () => {
     const source = await readFile(
       path.resolve(import.meta.dirname, '../src/pages/ChatPage.vue'),
       'utf8',
@@ -75,7 +103,30 @@ describe('native keyboard avoidance', () => {
     expect(source).toMatch(/\.chat-page\s*{[^}]*position:\s*relative/);
     expect(source).toMatch(/\.prompt-dock\s*{[^}]*position:\s*absolute/);
     expect(source).toMatch(/\.prompt-dock\s*{[^}]*bottom:\s*0/);
-    expect(source).toMatch(/\.chat-container\s*{[^}]*padding-bottom:\s*128px/);
+    expect(source).toContain('@layoutchange="handleComposerLayout"');
+    expect(source).toContain('@layoutchange="handleViewportLayout"');
+    expect(source).toMatch(/ref="promptRef"[\s\S]*?:flatten="false"/);
+    expect(source).toMatch(/:id="`chat-message-\$\{message\.id\}`"[\s\S]*?:flatten="false"/);
+    expect(source).toContain('@scroll="handleScroll"');
+    expect(source).toContain('@contentsizechanged="handleContentSizeChanged"');
+    expect(source).toContain('class="chat-bottom-spacer"');
+    expect(source).not.toMatch(/\.chat-container\s*{[^}]*padding-bottom:\s*128px/);
+  });
+
+  it('uses a multiline composer whose mirror drives its native and web height', async () => {
+    const source = await readFile(
+      path.resolve(import.meta.dirname, '../src/components/chat/PromptBox.vue'),
+      'utf8',
+    );
+
+    expect(source).toContain('<textarea');
+    expect(source).toContain('<x-textarea');
+    expect(source).toMatch(/\.SystemInfo\s*\?\.platform === ["']web["']/);
+    expect(source).toContain('class="prompt-input-mirror');
+    expect(source).toContain(':maxlines="5"');
+    expect(source).toMatch(/\.prompt-input-stack\s*{[^}]*position:\s*relative/);
+    expect(source).toMatch(/\.prompt-input-web\s*{[^}]*position:\s*absolute/);
+    expect(source).toMatch(/\.prompt-input\s*{[^}]*box-sizing:\s*border-box/);
   });
 });
 

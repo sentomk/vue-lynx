@@ -86,7 +86,7 @@ describe('agent spinner', () => {
       'utf8',
     );
 
-    expect(chatPage).toContain("status.value === 'submitted'");
+    expect(chatPage).toMatch(/status\.value === ["']submitted["']/);
     expect(chatPage).toContain('lastMessage.value.parts.length === 0');
     expect(chatPage).toContain('<Indicator />');
     expect(chatPage).toContain('Thinking...');
