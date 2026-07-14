@@ -45,8 +45,11 @@ export function useKeyboardAvoidance(
   onHeightChange?: (height: number, previousHeight: number) => void,
 ): void {
   let cleanup: (() => void) | undefined;
+  const isWeb =
+    (globalThis as { SystemInfo?: { platform?: string } }).SystemInfo?.platform === 'web';
 
   onMounted(() => {
+    if (isWeb) return;
     if (typeof lynx === 'undefined') return;
     const emitter = lynx.getJSModule('GlobalEventEmitter') as KeyboardEventEmitter | undefined;
     if (!emitter) return;

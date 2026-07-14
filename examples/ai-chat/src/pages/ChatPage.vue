@@ -11,6 +11,7 @@ import MessageContent from '../components/chat/message/MessageContent.vue';
 import PromptBox from '../components/chat/PromptBox.vue';
 import Navbar from '../components/Navbar.vue';
 import Icon from '../components/ui/Icon.vue';
+import MotionPressable from '../components/ui/MotionPressable.vue';
 import { useAttachments } from '../composables/useAttachments';
 import { useChat } from '../composables/useChat';
 import { useChats } from '../composables/useChats';
@@ -61,6 +62,11 @@ const { files, open, removeFile, clearFiles, uploading, uploadedFiles } = useAtt
 
 const scrollRef = useTemplateRef<ShadowElement>('scrollRef');
 const promptRef = useTemplateRef<ShadowElement>('promptRef');
+interface PromptBoxHandle {
+  blur(): void;
+  focus(): void;
+}
+const promptBoxRef = useTemplateRef<PromptBoxHandle>('promptBoxRef');
 
 interface LayoutEvent {
   detail?: { height?: number };
@@ -71,6 +77,16 @@ interface ScrollEvent {
     scrollTop?: number;
     scrollHeight?: number;
   };
+}
+
+interface TouchPoint {
+  clientY?: number;
+  pageY?: number;
+}
+
+interface TouchLikeEvent {
+  touches?: TouchPoint[];
+  detail?: { touches?: TouchPoint[] };
 }
 
 const systemInfo = (
@@ -86,11 +102,13 @@ const viewportHeight = ref(initialViewportHeight);
 const composerHeight = ref(112);
 const keyboardHeight = ref(0);
 const anchoredMessageId = ref<string | null>(null);
+const animatedUserMessageId = ref<string | null>(null);
 const anchoredTurnHeight = ref(0);
 const followsOutput = ref(true);
 const messageHeights = new Map<string, number>();
 let scrollTop = 0;
 let scrollHeight = 0;
+let scrollDragStartY: number | null = null;
 
 useKeyboardAvoidance(promptRef, (height) => {
   keyboardHeight.value = height;
@@ -113,7 +131,7 @@ const chat = useChat({
       description: message,
       icon: 'i-lucide-alert-circle',
       color: 'error',
-      duration: 0,
+      duration: 4000,
     });
   },
 });
@@ -171,12 +189,43 @@ function updateAnchoredTurnHeight() {
   anchoredTurnHeight.value = Math.max(84, height);
 }
 
-function beginAnchoredTurn(message: UIMessage | undefined) {
+function beginAnchoredTurn(message: UIMessage | undefined, animateUser: boolean) {
   if (!message || message.role !== 'user') return;
   anchoredMessageId.value = message.id;
+  animatedUserMessageId.value = animateUser ? message.id : null;
   followsOutput.value = true;
   updateAnchoredTurnHeight();
   void scrollMessageToTop(message.id);
+}
+
+function isAssistantForAnimatedTurn(message: UIMessage) {
+  const anchorId = animatedUserMessageId.value;
+  if (!anchorId || message.role !== 'assistant') return false;
+  const anchorIndex = messages.value.findIndex((item) => item.id === anchorId);
+  return anchorIndex >= 0 && messages.value[anchorIndex + 1]?.id === message.id;
+}
+
+function touchY(event: TouchLikeEvent) {
+  const point = event.touches?.[0] ?? event.detail?.touches?.[0];
+  const y = Number(point?.clientY ?? point?.pageY);
+  return Number.isFinite(y) ? y : null;
+}
+
+function handleScrollTouchStart(event: TouchLikeEvent) {
+  scrollDragStartY = touchY(event);
+}
+
+function handleScrollTouchMove(event: TouchLikeEvent) {
+  if (keyboardHeight.value <= 0 || scrollDragStartY === null) return;
+  const nextY = touchY(event);
+  if (nextY === null || Math.abs(nextY - scrollDragStartY) < 6) return;
+  scrollDragStartY = null;
+  followsOutput.value = false;
+  promptBoxRef.value?.blur();
+}
+
+function handleScrollTouchEnd() {
+  scrollDragStartY = null;
 }
 
 function handleScroll(event: ScrollEvent) {
@@ -253,7 +302,7 @@ onMounted(async () => {
   // Arriving from the home page with only the first user message: generate.
   if (data.value.isOwner && data.value.messages.length === 1) {
     const generation = regenerate();
-    beginAnchoredTurn(messages.value[0]);
+    beginAnchoredTurn(messages.value[0], true);
     void generation;
   } else {
     void scrollToBottom();
@@ -266,7 +315,7 @@ async function handleSubmit() {
       text: input.value,
       files: uploadedFiles.value.length > 0 ? uploadedFiles.value : undefined,
     });
-    beginAnchoredTurn(messages.value[messages.value.length - 1]);
+    beginAnchoredTurn(messages.value[messages.value.length - 1], true);
     input.value = '';
     clearFiles();
     void generation;
@@ -294,7 +343,7 @@ async function saveEdit(message: UIMessage, text: string) {
   }
   editingMessageId.value = null;
   const generation = sendMessage({ text, messageId: message.id });
-  beginAnchoredTurn(messages.value[messages.value.length - 1]);
+  beginAnchoredTurn(messages.value[messages.value.length - 1], true);
   void generation;
 }
 
@@ -313,13 +362,15 @@ async function regenerateMessage(message: UIMessage) {
     return;
   }
   const generation = regenerate({ messageId: message.id });
-  beginAnchoredTurn([...messages.value].reverse().find((item) => item.role === 'user'));
+  const userMessage = [...messages.value].reverse().find((item) => item.role === 'user');
+  beginAnchoredTurn(userMessage, false);
   void generation;
 }
 
 function handleRegenerate() {
   const generation = regenerate();
-  beginAnchoredTurn([...messages.value].reverse().find((message) => message.role === 'user'));
+  const userMessage = [...messages.value].reverse().find((message) => message.role === 'user');
+  beginAnchoredTurn(userMessage, false);
   void generation;
 }
 
@@ -375,6 +426,8 @@ const showIndicator = computed(
       lastMessage.value.parts.length === 0),
 );
 
+const showGenerationError = computed(() => status.value === 'error' && Boolean(error.value));
+
 watch(showIndicator, () => {
   void nextTick().then(updateAnchoredTurnHeight);
 });
@@ -409,10 +462,16 @@ const bottomSpacerHeight = computed(() =>
     <scroll-view
       ref="scrollRef"
       scroll-orientation="vertical"
+      :bounces="false"
+      :scroll-bar-enable="false"
       class="flex-1 min-h-0"
       @layoutchange="handleViewportLayout"
       @scroll="handleScroll"
       @contentsizechanged="handleContentSizeChanged"
+      @touchstart="handleScrollTouchStart"
+      @touchmove="handleScrollTouchMove"
+      @touchend="handleScrollTouchEnd"
+      @touchcancel="handleScrollTouchEnd"
     >
       <view class="flex flex-col pt-4 chat-container" :class="isMobile ? 'px-4' : 'px-6'">
         <view class="flex flex-col gap-6">
@@ -422,14 +481,22 @@ const bottomSpacerHeight = computed(() =>
             :key="message.id"
             :flatten="false"
             class="flex flex-col"
-            :class="message.role === 'user' ? 'items-end' : 'items-start'"
+            :class="[
+              message.role === 'user' ? 'items-end' : 'items-start',
+              isAssistantForAnimatedTurn(message) ? 'assistant-turn-enter' : '',
+            ]"
             @layoutchange="(event) => handleMessageLayout(message.id, event)"
           >
             <!-- user bubble / assistant full width -->
             <view
-              :class="
-                message.role === 'user' ? 'bg-elevated rounded-lg px-4 py-3 user-bubble' : 'w-full'
-              "
+              :class="[
+                message.role === 'user'
+                  ? 'bg-elevated rounded-lg px-4 py-3 user-bubble'
+                  : 'w-full',
+                message.role === 'user' && message.id === animatedUserMessageId
+                  ? 'user-message-enter'
+                  : '',
+              ]"
             >
               <MessageContent
                 :message="message"
@@ -454,9 +521,31 @@ const bottomSpacerHeight = computed(() =>
           </view>
 
           <!-- thinking indicator -->
-          <view v-if="showIndicator" class="flex flex-row items-center gap-1.5">
+          <view
+            v-if="showIndicator"
+            class="flex flex-row items-center gap-1.5"
+            :class="animatedUserMessageId ? 'assistant-turn-enter' : ''"
+          >
             <Indicator />
             <text class="text-sm text-muted shimmer-pulse">Thinking...</text>
+          </view>
+
+          <view
+            v-if="showGenerationError"
+            class="flex flex-row items-center gap-2 rounded-lg border border-default bg-muted px-3 py-2.5 generation-error"
+            :class="animatedUserMessageId ? 'assistant-turn-enter' : ''"
+          >
+            <Icon name="i-lucide-alert-circle" tone="error" :size="16" />
+            <text class="text-sm text-muted flex-1" text-maxline="2">
+              {{ error?.message || 'The response stopped unexpectedly.' }}
+            </text>
+            <MotionPressable
+              class="rounded-md bg-elevated px-2.5 py-1.5"
+              accessibility-label="Retry response"
+              @tap="handleRegenerate"
+            >
+              <text class="text-sm font-medium text-highlighted">Retry</text>
+            </MotionPressable>
           </view>
         </view>
 
@@ -473,9 +562,9 @@ const bottomSpacerHeight = computed(() =>
     >
       <view class="pb-4 pt-1 prompt-container" :class="isMobile ? 'px-4' : 'px-6'">
         <PromptBox
+          ref="promptBoxRef"
           v-model="input"
           :status="status"
-          :error="error?.message"
           :disabled="uploading"
           @submit="handleSubmit"
           @stop="stop()"

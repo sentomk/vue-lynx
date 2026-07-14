@@ -4,7 +4,10 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { bindKeyboardAvoidance } from '../src/composables/useKeyboardAvoidance';
-import { setNativeInputValue } from '../src/composables/useNativeInputValue';
+import {
+  createNativeInputValueSync,
+  setNativeInputValue,
+} from '../src/composables/useNativeInputValue';
 import { inputEventValue } from '../src/lib/input-event';
 
 describe('cross-platform text input', () => {
@@ -16,6 +19,16 @@ describe('cross-platform text input', () => {
 });
 
 describe('native keyboard avoidance', () => {
+  it('does not subscribe to the native keyboard emitter in Lynx Web', async () => {
+    const source = await readFile(
+      path.resolve(import.meta.dirname, '../src/composables/useKeyboardAvoidance.ts'),
+      'utf8',
+    );
+
+    expect(source).toMatch(/SystemInfo\?\.platform\s*===\s*['"]web['"]/);
+    expect(source).toMatch(/if \(isWeb\) return;/);
+  });
+
   it('moves the composer by the keyboard height and restores it on close', () => {
     let listener: ((status: unknown, height: unknown) => void) | undefined;
     const emitter = {
@@ -131,10 +144,28 @@ describe('native keyboard avoidance', () => {
 });
 
 describe('native drawer motion', () => {
-  it('animates the persistent backdrop and panel with native-safe style updates', async () => {
+  it('keeps the mobile navbar below the iOS full-screen safe area', async () => {
+    const source = await readFile(
+      path.resolve(import.meta.dirname, '../src/components/Navbar.vue'),
+      'utf8',
+    );
+
+    expect(source).toContain("SystemInfo?.platform === 'iOS'");
+    expect(source).toContain('safeAreaTop');
+    expect(source).toContain("hostProps?.fullscreen === true || hostProps?.fullscreen === 'true'");
+    expect(source).toContain('paddingTop: isMobile.value && safeAreaTop > 0');
+    expect(source).toContain("height: isMobile.value ? `${48 + safeAreaTop}px` : '48px'");
+    expect(source).toContain(':style="navbarStyle"');
+  });
+
+  it('animates the persistent backdrop and panel with direct native style updates', async () => {
     const source = await readFile(path.resolve(import.meta.dirname, '../src/App.vue'), 'utf8');
 
-    expect(source).toMatch(/\.drawer-panel\s*{[^}]*transition:\s*transform 240ms/);
+    expect(source).toContain("const drawerRef = useTemplateRef<ShadowElement>('drawerRef')");
+    expect(source).toMatch(/drawerRef\.value\s*\?\.setNativeProps\(\{/);
+    expect(source).toContain("transform: open ? 'translateX(0px)' : 'translateX(-288px)'");
+    expect(source).toContain("transition: reducedMotion.value ? 'none' : `transform 240ms ${DRAWER_EASING}`");
+    expect(source).toContain('ref="drawerRef"');
     expect(source).toMatch(/\.drawer-backdrop\s*{[^}]*transition:\s*opacity 240ms/);
     expect(source).toContain("opacity: sidebarOpen ? '1' : '0'");
   });
@@ -146,8 +177,11 @@ describe('native drawer motion', () => {
     expect(source).toContain('class="absolute inset-0 drawer-backdrop"');
     expect(source).toContain('@tap="handleSidebarShowChange(false)"');
     expect(source).toContain(':event-through="false"');
-    expect(source).toMatch(/v-if="isMobile"\s+class="absolute top-0 bottom-0 left-0/);
-    expect(source).toContain("transform: sidebarOpen ? 'translateX(0px)' : 'translateX(-288px)'");
+    expect(source).toMatch(
+      /v-if="isMobile"[\s\S]*?ref="drawerRef"[\s\S]*?class="absolute top-0 bottom-0 left-0/,
+    );
+    expect(source).toContain("transform: 'translateX(-288px)'");
+    expect(source).not.toContain("transform: sidebarOpen ? 'translateX(0px)' : 'translateX(-288px)'");
     expect(source).not.toContain('drawer-layer');
     expect(source).not.toContain('<Transition name="drawer-panel"');
   });
@@ -159,6 +193,7 @@ describe('native drawer motion', () => {
     );
     expect(source).toContain("const drawerTopPadding = isIOS ? '60px' : '16px'");
     expect(source).toContain('paddingTop: drawer ? drawerTopPadding : undefined');
+    expect(source).toContain('accessibility-label="Close navigation"');
   });
 });
 
@@ -176,6 +211,23 @@ describe('native message editing', () => {
     expect(exec).toHaveBeenCalledOnce();
   });
 
+  it('waits for native layout availability and only initializes once', () => {
+    const exec = vi.fn();
+    const invoke = vi.fn(() => ({ exec }));
+    const target: { value: { invoke: typeof invoke } | null } = { value: null };
+    const sync = createNativeInputValueSync(target, () => 'Why use Nuxt UI?');
+
+    sync();
+    expect(invoke).not.toHaveBeenCalled();
+
+    target.value = { invoke };
+    sync();
+    sync();
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(exec).toHaveBeenCalledOnce();
+  });
+
   it('syncs the editor value after its native input is mounted', async () => {
     const source = await readFile(
       path.resolve(import.meta.dirname, '../src/components/chat/message/MessageEdit.vue'),
@@ -184,6 +236,9 @@ describe('native message editing', () => {
 
     expect(source).toContain('v-model="editingText"');
     expect(source).toContain('ref="inputRef"');
-    expect(source).toContain('useNativeInputValue(inputRef, () => editingText.value)');
+    expect(source).toContain(
+      'const syncInitialValue = useNativeInputValue(inputRef, () => editingText.value)',
+    );
+    expect(source).toContain('@layoutchange="syncInitialValue"');
   });
 });

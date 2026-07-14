@@ -1,5 +1,3 @@
-import { nextTick, onMounted } from 'vue-lynx';
-
 export interface NativeInputTarget {
   invoke(options: {
     method: string;
@@ -16,14 +14,23 @@ export function setNativeInputValue(target: NativeInputTarget, value: string): v
     .exec();
 }
 
+export function createNativeInputValueSync(
+  target: Readonly<{ value: NativeInputTarget | null }>,
+  getValue: () => string,
+): () => void {
+  let synced = false;
+  return () => {
+    if (synced || !target.value) return;
+    setNativeInputValue(target.value, getValue());
+    synced = true;
+  };
+}
+
 export function useNativeInputValue(
   target: Readonly<{ value: NativeInputTarget | null }>,
   getValue: () => string,
-): void {
-  onMounted(async () => {
-    // Wait until the input creation op has reached the native tree before
-    // invoking its UI method. v-model continues to own subsequent updates.
-    await nextTick();
-    if (target.value) setNativeInputValue(target.value, getValue());
-  });
+): () => void {
+  // A conditional input can mount before its create op reaches the native
+  // tree. Its first layoutchange is the deterministic native-ready signal.
+  return createNativeInputValueSync(target, getValue);
 }

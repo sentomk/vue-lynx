@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue-lynx';
+import { computed, useTemplateRef } from 'vue-lynx';
+import type { ShadowElement } from 'vue-lynx';
 
 import { inputEventValue } from '../../lib/input-event';
 import type { ChatStatus } from '../../types/ai';
 import ModelSelect from '../ModelSelect.vue';
 import Icon from '../ui/Icon.vue';
+import MotionPressable from '../ui/MotionPressable.vue';
 
 /**
  * Port of UChatPrompt + UChatPromptSubmit: textarea with a footer row
@@ -17,7 +19,6 @@ const props = withDefaults(
     modelValue: string;
     status?: ChatStatus;
     disabled?: boolean;
-    error?: string | null;
     placeholder?: string;
   }>(),
   { status: 'ready', placeholder: 'Type your message here...' },
@@ -32,6 +33,7 @@ const emit = defineEmits<{
 }>();
 
 const isWeb = (globalThis as { SystemInfo?: { platform?: string } }).SystemInfo?.platform === 'web';
+const inputRef = useTemplateRef<ShadowElement>('inputRef');
 
 const submitState = computed(() => {
   if (props.status === 'submitted' || props.status === 'streaming') return 'stop';
@@ -49,17 +51,26 @@ function onSubmitTap() {
   else if (submitState.value === 'reload') emit('reload');
   else if (props.modelValue.trim()) emit('submit');
 }
+
+function invokeInput(method: 'focus' | 'blur') {
+  inputRef.value?.invoke({ method }).exec();
+}
+
+function blurInput() {
+  invokeInput('blur');
+}
+
+function focusInput() {
+  invokeInput('focus');
+}
+
+defineExpose({ blur: blurInput, focus: focusInput });
 </script>
 
 <template>
   <view
     class="flex flex-col rounded-lg prompt-surface border border-default px-1.5 pt-1.5 pb-1.5 shadow-sm"
   >
-    <view v-if="error" class="flex flex-row items-center gap-2 px-2.5 pt-1.5 pb-1">
-      <Icon name="i-lucide-alert-circle" tone="error" :size="16" />
-      <text class="text-sm text-error flex-1" text-maxline="2">{{ error }}</text>
-    </view>
-
     <slot name="header" />
 
     <view class="prompt-input-stack">
@@ -71,6 +82,7 @@ function onSubmitTap() {
            emits Lynx-shaped input events; Native uses the built-in tag. -->
       <view v-if="isWeb" class="prompt-input-web px-2.5 py-2">
         <x-textarea
+          ref="inputRef"
           :value="modelValue"
           :placeholder="placeholder"
           :maxlines="5"
@@ -85,6 +97,7 @@ function onSubmitTap() {
       </view>
       <textarea
         v-else
+        ref="inputRef"
         :value="modelValue"
         :placeholder="placeholder"
         :maxlines="5"
@@ -100,19 +113,27 @@ function onSubmitTap() {
 
     <view class="flex flex-row items-center justify-between px-1 pt-1">
       <view class="flex flex-row items-center gap-1">
-        <view class="p-1.5 rounded-md" @tap="emit('attach')">
+        <MotionPressable
+          class="p-1.5 rounded-md"
+          accessibility-label="Attach file"
+          @tap="emit('attach')"
+        >
           <Icon name="i-lucide-paperclip" tone="muted" :size="16" />
-        </view>
+        </MotionPressable>
 
         <ModelSelect />
       </view>
 
-      <view
+      <MotionPressable
         class="rounded-full p-1.5 bg-inverted items-center justify-center"
         :class="disabled ? 'opacity-50' : ''"
+        :disabled="disabled"
+        :accessibility-label="submitState === 'stop' ? 'Stop response' : submitState === 'reload' ? 'Retry response' : 'Send message'"
         @tap="onSubmitTap"
       >
         <Icon
+          :key="submitState"
+          class="submit-icon-enter"
           :name="
             submitState === 'stop'
               ? 'i-lucide-square'
@@ -123,7 +144,7 @@ function onSubmitTap() {
           tone="inverted"
           :size="16"
         />
-      </view>
+      </MotionPressable>
     </view>
   </view>
 </template>

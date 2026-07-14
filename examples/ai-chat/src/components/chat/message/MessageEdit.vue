@@ -19,7 +19,7 @@ const emit = defineEmits<{
 
 const editingText = ref(props.text);
 const inputRef = useTemplateRef<ShadowElement>('inputRef');
-useNativeInputValue(inputRef, () => editingText.value);
+const syncInitialValue = useNativeInputValue(inputRef, () => editingText.value);
 const canSave = computed(
   () => editingText.value.trim().length > 0 && editingText.value !== props.text,
 );
@@ -33,6 +33,7 @@ const canSave = computed(
       v-model="editingText"
       class="edit-input text-base text-highlighted"
       confirm-type="done"
+      @layoutchange="syncInitialValue"
       @confirm="canSave && emit('save', message, editingText)"
     />
 
