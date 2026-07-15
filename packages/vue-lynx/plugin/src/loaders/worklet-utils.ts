@@ -67,7 +67,7 @@ function matchesPattern(
   pattern: string | RegExp,
 ): boolean {
   return pattern instanceof RegExp
-    ? pattern.test(packageRoot)
+    ? new RegExp(pattern.source, pattern.flags).test(packageRoot)
     : packageRoot === pattern;
 }
 

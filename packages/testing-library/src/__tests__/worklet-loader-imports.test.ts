@@ -83,6 +83,17 @@ describe('isWorkletPackage', () => {
     expect(isWorkletPackage('lodash', [/^@my-org\//])).toBe(false);
   });
 
+  it.each([/^@my-org\//g, /^@my-org\//y])(
+    'treats stateful pattern %s as stateless',
+    (pattern) => {
+      pattern.lastIndex = 2;
+
+      expect(isWorkletPackage('@my-org/lynx-anim', [pattern])).toBe(true);
+      expect(isWorkletPackage('@my-org/lynx-anim', [pattern])).toBe(true);
+      expect(pattern.lastIndex).toBe(2);
+    },
+  );
+
   it('empty allowlist matches nothing', () => {
     expect(isWorkletPackage('anything', [])).toBe(false);
   });
