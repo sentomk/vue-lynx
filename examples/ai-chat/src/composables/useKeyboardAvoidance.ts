@@ -4,14 +4,8 @@ const KEYBOARD_EVENT = 'keyboardstatuschanged';
 const EASING = 'cubic-bezier(0.25, 1, 0.5, 1)';
 
 export interface KeyboardEventEmitter {
-  addListener(
-    name: string,
-    listener: (status: unknown, height: unknown) => void,
-  ): void;
-  removeListener(
-    name: string,
-    listener: (status: unknown, height: unknown) => void,
-  ): void;
+  addListener(name: string, listener: (status: unknown, height: unknown) => void): void;
+  removeListener(name: string, listener: (status: unknown, height: unknown) => void): void;
 }
 
 export interface KeyboardAvoidanceTarget {
@@ -27,7 +21,9 @@ function keyboardHeight(status: unknown, height: unknown): number {
 export function bindKeyboardAvoidance(
   emitter: KeyboardEventEmitter,
   getTarget: () => KeyboardAvoidanceTarget | null,
+  onHeightChange?: (height: number, previousHeight: number) => void,
 ): () => void {
+  let previousHeight = 0;
   const listener = (status: unknown, height: unknown) => {
     const offset = keyboardHeight(status, height);
     getTarget()
@@ -36,6 +32,8 @@ export function bindKeyboardAvoidance(
         transition: `transform ${offset > 0 ? '0.3s' : '0.1s'} ${EASING}`,
       })
       .exec();
+    onHeightChange?.(offset, previousHeight);
+    previousHeight = offset;
   };
 
   emitter.addListener(KEYBOARD_EVENT, listener);
@@ -44,14 +42,18 @@ export function bindKeyboardAvoidance(
 
 export function useKeyboardAvoidance(
   target: Readonly<{ value: KeyboardAvoidanceTarget | null }>,
+  onHeightChange?: (height: number, previousHeight: number) => void,
 ): void {
   let cleanup: (() => void) | undefined;
+  const isWeb =
+    (globalThis as { SystemInfo?: { platform?: string } }).SystemInfo?.platform === 'web';
 
   onMounted(() => {
+    if (isWeb) return;
     if (typeof lynx === 'undefined') return;
     const emitter = lynx.getJSModule('GlobalEventEmitter') as KeyboardEventEmitter | undefined;
     if (!emitter) return;
-    cleanup = bindKeyboardAvoidance(emitter, () => target.value);
+    cleanup = bindKeyboardAvoidance(emitter, () => target.value, onHeightChange);
   });
 
   onUnmounted(() => cleanup?.());

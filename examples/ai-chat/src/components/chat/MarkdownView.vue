@@ -27,6 +27,13 @@ function tableStyle(columns: number) {
   return { width: `${Math.max(320, columns * 160)}px` };
 }
 
+function streamBlockStyle(index: number) {
+  return {
+    marginTop: index > 0 ? '16px' : '0px',
+    animationDelay: props.streaming ? `${Math.min(index, 3) * 28}ms` : '0ms',
+  };
+}
+
 const HEADING_CLASSES: Record<number, string> = {
   1: 'text-2xl font-bold text-highlighted',
   2: 'text-xl font-bold text-highlighted',
@@ -50,7 +57,8 @@ const HEADING_CLASSES: Record<number, string> = {
     <view
       v-for="(block, bi) in blocks"
       :key="bi"
-      :style="bi > 0 ? { marginTop: '16px' } : undefined"
+      :class="streaming ? 'stream-block-enter' : ''"
+      :style="streamBlockStyle(bi)"
     >
       <!-- paragraph / heading / quote share the inline renderer -->
       <text
