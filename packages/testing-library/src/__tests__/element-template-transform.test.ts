@@ -253,7 +253,7 @@ describe('element-template transform', () => {
     expect(code).toContain('__SetInlineStyles(e2, {"color":"red"})');
     const fixed = [...lowered.container.querySelectorAll('text')].find(
       (n) => n.textContent === 'fixed',
-    ) as HTMLElement;
+    ) as unknown as HTMLElement;
     expect(fixed.style.fontSize).toBe('12px');
   });
 

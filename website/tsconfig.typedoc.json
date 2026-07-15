@@ -11,6 +11,7 @@
     "../packages/vue-lynx/runtime/src/**/*.ts",
     "../packages/vue-lynx/plugin/src/**/*.ts",
     "../packages/vue-lynx/internal/src/**/*.ts",
+    "../packages/vue-lynx/main-thread/src/**/*.ts",
     "../packages/testing-library/src/**/*.ts"
   ]
 }

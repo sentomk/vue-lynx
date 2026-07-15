@@ -29,8 +29,10 @@ const g = globalThis as Record<string, unknown>;
 // (e.g. the Lynx testing environment's main-thread context) define
 // `SystemInfo` directly without mirroring it on `lynx.SystemInfo` — first
 // screen code that measures against screen dimensions depends on it.
-g['SystemInfo'] = (typeof lynx !== 'undefined' && lynx.SystemInfo)
-  ?? g['SystemInfo'] ?? {};
+g['SystemInfo'] =
+  (typeof lynx !== 'undefined'
+    && (lynx as { SystemInfo?: unknown }).SystemInfo)
+    ?? g['SystemInfo'] ?? {};
 
 // Register runOnBackground as a global — extracted LEPUS worklet code calls it
 // as a bare identifier (the SWC transform generates `runOnBackground(_jsFnK)`).

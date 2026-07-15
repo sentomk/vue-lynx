@@ -76,6 +76,18 @@ depends on lowering:
 Scoped CSS is fully supported — the component's CSS scope id is baked into
 the skeleton at compile time.
 
+## Measured results
+
+From the [strategy benchmark](https://github.com/Huxpro/vue-lynx/blob/main/packages/ifr-bench/REPORT.md) (~1000-element synthetic screens, `--jitless` interpreter, warm medians) — render time and the ops payload that would cross the thread boundary:
+
+| scene | unlowered | lowered | ops payload |
+|---|---|---|---|
+| static-heavy (99.7% static) | 10.9 ms | **0.74 ms** | 77.6 KB → **69 B** |
+| content feed (37% static) | 8.4 ms | **1.26 ms** | 60.4 KB → 9.2 KB |
+| v-for list (12% static) | 6.6 ms | **1.44 ms** | 45.1 KB → 17.1 KB |
+
+In a real browser (Lynx for Web) under 4× CPU throttling, `ifr+et` reached FCP −17% vs −12% for plain IFR on the hello-world screen — the lowering advantage grows as CPUs get slower and screens get bigger. See the [IFR page](/guide/ifr#measured-performance) for the full picture including costs.
+
 ## Semantics guarantee
 
 Lowered and unlowered renders produce identical documents (verified in CI by

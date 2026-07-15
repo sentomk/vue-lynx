@@ -67,6 +67,18 @@ export default defineConfig({
 
 Scoped CSS 完整支持——组件的 CSS scope id 在编译期烘焙进骨架。
 
+## 实测结果
+
+来自[策略基准](https://github.com/Huxpro/vue-lynx/blob/main/packages/ifr-bench/REPORT.md)（约 1000 节点合成首屏、`--jitless` 解释器、warm 中位）——渲染耗时与需要跨线程的 ops 载荷：
+
+| 场景 | 未下沉 | 下沉后 | ops 载荷 |
+|---|---|---|---|
+| 静态为主（99.7% 静态） | 10.9 ms | **0.74 ms** | 77.6 KB → **69 B** |
+| 内容流（37% 静态） | 8.4 ms | **1.26 ms** | 60.4 KB → 9.2 KB |
+| v-for 列表（12% 静态） | 6.6 ms | **1.44 ms** | 45.1 KB → 17.1 KB |
+
+真实浏览器（Lynx for Web）4× CPU 节流下，hello-world 屏上 `ifr+et` 的 FCP 达到 −17%，超过纯 IFR 的 −12%——CPU 越慢、屏幕越大，下沉的优势越明显。完整图景（含成本）见 [IFR 页面](/zh/guide/ifr#实测性能)。
+
 ## 语义保证
 
 下沉与未下沉的渲染产出完全一致的文档（CI 中每个测试模板都会双向编译并比对
