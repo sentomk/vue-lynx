@@ -67,6 +67,25 @@ export default defineConfig({
 
 Scoped CSS 完整支持——组件的 CSS scope id 在编译期烘焙进骨架。
 
+## 与 Lynx 原生 element template 的关系
+
+Lynx 引擎有一套同名的原生机制：元素树可以编码进 bundle 的二进制
+`elementTemplates` 段，由引擎通过 `__ElementFromBinary` PAPI 直接实例化、
+用 `__GetTemplateParts` 解析命名部件——全程不涉及 JavaScript。
+
+**Vue Lynx 的元素模板目前并不使用这套机制。**这里的"模板"是编译器生成的
+JavaScript `create()` 函数——一串普通的元素 PAPI 调用——注册在框架层的
+注册表里，由 Vue Lynx 自己的 `INSTANTIATE_TEMPLATE` 操作触发。在引擎看来
+这就是一段正常的元素创建序列；下沉消除的是这些调用*周围*的框架开销
+（vdom、逐节点 ops、解释器分发），实测收益也来自这里。ReactLynx 的
+snapshot 做了同样的选择：它们同样生成直线 PAPI 调用，而不是二进制模板。
+
+两套设计是互补而非竞争关系：编译产物（静态骨架 + 洞列表）恰好是二进制
+编码需要的全部信息，所以把同一个 transform 的后端切到原生
+`elementTemplates` 段 + `__ElementFromBinary` 实例化是可能的未来方向——
+它能把骨架的 JS 执行也从首帧中移除。该后端已在跟踪中，取决于编码管线
+与跨平台支持。
+
 ## 实测结果
 
 来自[策略基准](https://github.com/Huxpro/vue-lynx/blob/main/packages/ifr-bench/REPORT.md)（约 1000 节点合成首屏、`--jitless` 解释器、warm 中位）——渲染耗时与需要跨线程的 ops 载荷：

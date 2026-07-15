@@ -76,6 +76,30 @@ depends on lowering:
 Scoped CSS is fully supported — the component's CSS scope id is baked into
 the skeleton at compile time.
 
+## Relationship to Lynx's native element templates
+
+The Lynx engine has a native mechanism of the same name: element trees can be
+encoded into a binary `elementTemplates` section of the bundle and
+instantiated by the engine directly via the `__ElementFromBinary` PAPI, with
+named parts resolved through `__GetTemplateParts` — no JavaScript involved.
+
+**Vue Lynx's element templates do not use that mechanism today.** The
+"template" here is a compiler-generated JavaScript `create()` function of
+ordinary element PAPI calls, registered in a framework-level registry and
+triggered by Vue Lynx's own `INSTANTIATE_TEMPLATE` op. To the engine it looks
+like a normal sequence of element creations — what the lowering removes is
+the framework work *around* those calls (vdom, per-node ops, interpreter
+dispatch), which is where the measured wins come from. ReactLynx's snapshots
+make the same choice: they too emit straight-line PAPI calls rather than
+binary templates.
+
+The two designs are complementary rather than competing: the compiler output
+(static skeleton + hole list) is exactly what a binary encoding needs, so
+targeting the native `elementTemplates` section with `__ElementFromBinary`
+instantiation is a possible future backend for the same transform — it would
+remove even the skeleton's JS execution from the first frame. That backend is
+tracked but gated on encode-pipeline and cross-platform support.
+
 ## Measured results
 
 From the [strategy benchmark](https://github.com/Huxpro/vue-lynx/blob/main/packages/ifr-bench/REPORT.md) (~1000-element synthetic screens, `--jitless` interpreter, warm medians) — render time and the ops payload that would cross the thread boundary:
