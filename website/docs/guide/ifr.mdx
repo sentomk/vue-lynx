@@ -192,17 +192,21 @@ configuration.
 ## Benchmarks
 
 The table keeps the three product configurations separate. FCP is hello-world
-on Lynx for Web with a real Web Worker and 4x CPU throttling. Render cost is the
-warm median for a roughly 1,000-element dynamic-content scene under V8
-`--jitless`. TTI and gzip are medians from the all-examples sweep, normalized to
-No IFR. These are separate campaigns; the columns should not be read as one
-end-to-end trace.
+on Lynx for Web with a real Web Worker (no CPU throttle; the median win across
+ten examples is −24%). Render cost is the warm median for a roughly
+1,000-element dynamic-content scene under V8 `--jitless`. TTI and gzip are
+medians from the all-examples sweep, normalized to No IFR. These are separate
+campaigns; the columns should not be read as one end-to-end trace.
 
 | configuration | flags | FCP | render cost | TTI proxy | bundle gzip |
 | --- | --- | ---: | ---: | ---: | ---: |
-| No IFR | `IFR=false, ET=false` | 402.9 ms | 9.4 ms | 1.00x | 1.00x |
-| **IFR + ET** | `IFR=true, ET=default` | **333.3 ms (−17%)** | **1.3 ms** | 1.35x | ~2.26x |
-| IFR without ET | `IFR=true, ET=false` | 354.4 ms (−12%) | 8.4 ms | 1.36x | ~2.26x |
+| No IFR | `IFR=false, ET=false` | 97.8 ms | 9.4 ms | 1.00x | 1.00x |
+| **IFR + ET** | `IFR=true, ET=default` | **69.6 ms (−29%)** | **1.3 ms** | 1.35x | ~2.26x |
+| IFR without ET | `IFR=true, ET=false` | 70.3 ms (−28%) | 8.4 ms | 1.36x | ~2.26x |
+
+The two IFR configurations tie on FCP at full CPU speed (the synchronous
+render is milliseconds on small screens); ET pulls ahead under CPU throttling
+and on big screens — e.g. the 302-node gallery at 4×: −7% vs −1%.
 
 Element Templates reduce the recorded ops payload by 3–1,000x depending on how
 static the screen is; a 1,400-element static-heavy scene drops from about 78 KB

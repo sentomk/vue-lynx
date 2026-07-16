@@ -135,13 +135,15 @@ Vue Lynx 当前不使用 Lynx 的二进制 `elementTemplates` bundle section、`
 
 ## Benchmark
 
-下表把三种产品配置明确分开。FCP 来自 Lynx for Web 的真实 Web Worker，hello-world 在 4× CPU 节流下测量；渲染成本来自约 1000 元素动态内容场景的 V8 `--jitless` warm 中位；TTI 和 gzip 是全示例扫描相对 No IFR 归一化后的中位数。这些列来自不同轮次，不应视为同一条端到端 trace。
+下表把三种产品配置明确分开。FCP 来自 Lynx for Web 的真实 Web Worker，hello-world 无 CPU 节流测量（十个 example 的收益中位为 −24%）；渲染成本来自约 1000 元素动态内容场景的 V8 `--jitless` warm 中位；TTI 和 gzip 是全示例扫描相对 No IFR 归一化后的中位数。这些列来自不同轮次，不应视为同一条端到端 trace。
 
 | 配置 | flags | FCP | 渲染成本 | TTI proxy | bundle gzip |
 | --- | --- | ---: | ---: | ---: | ---: |
-| No IFR | `IFR=false, ET=false` | 402.9 ms | 9.4 ms | 1.00x | 1.00x |
-| **IFR + ET** | `IFR=true, ET=default` | **333.3 ms（−17%）** | **1.3 ms** | 1.35x | ~2.26x |
-| IFR without ET | `IFR=true, ET=false` | 354.4 ms（−12%） | 8.4 ms | 1.36x | ~2.26x |
+| No IFR | `IFR=false, ET=false` | 97.8 ms | 9.4 ms | 1.00x | 1.00x |
+| **IFR + ET** | `IFR=true, ET=default` | **69.6 ms（−29%）** | **1.3 ms** | 1.35x | ~2.26x |
+| IFR without ET | `IFR=true, ET=false` | 70.3 ms（−28%） | 8.4 ms | 1.36x | ~2.26x |
+
+满速 CPU 下两种 IFR 配置的 FCP 打平（小屏上同步渲染只有几毫秒）；CPU 节流和大屏下 ET 领先——例如 302 节点的 gallery 在 4× 节流下：−7% vs −1%。
 
 元素模板可按屏幕静态程度把记录的 ops 载荷缩小 3–1000 倍；一个 1400 元素的静态密集场景从约 78 KB 降到 69 字节。
 
