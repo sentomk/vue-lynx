@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { elementTemplateTransform } from '../../../vue-lynx/plugin/src/compiler/element-template-transform.js';
 import { pluginVueLynx } from '../../../vue-lynx/plugin/src/index.js';
 
 interface VueLoaderOptions {
@@ -83,7 +84,13 @@ function elementTemplatesEnabled(
     },
   });
 
-  return Boolean(loaderOptions?.compilerOptions?.nodeTransforms?.length);
+  // The base compiler options always carry transformPageElement — detect the
+  // element-template lowering transform specifically.
+  return Boolean(
+    loaderOptions?.compilerOptions?.nodeTransforms?.includes(
+      elementTemplateTransform,
+    ),
+  );
 }
 
 describe('pluginVueLynx optimization defaults', () => {

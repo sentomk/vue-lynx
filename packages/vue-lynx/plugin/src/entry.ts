@@ -16,6 +16,10 @@ import {
 } from '@lynx-js/template-webpack-plugin';
 
 import { LAYERS } from './layers.js';
+import {
+  isWorkletPackage,
+  packageNameFromNodeModulesPath,
+} from './loaders/worklet-utils.js';
 import { vueScopeStripCSSPlugin } from './plugins/vue-scope-strip-css-plugin.js';
 import { VueScopedCSSIdPlugin } from './plugins/vue-scoped-cssid-plugin.js';
 
@@ -208,6 +212,7 @@ export interface ApplyEntryOptions {
   enableIFR?: boolean;
   /** Element templates: preserve template registrations on the MT layer. */
   enableElementTemplates?: boolean;
+  includeWorkletPackages?: ReadonlyArray<string | RegExp>;
 }
 
 export function applyEntry(
@@ -289,6 +294,28 @@ export function applyEntry(
     return rspackConfig;
   });
 
+  // Worklet packages: opt-in bare specifiers whose `'main thread'` worklets
+  // must reach the MT bundle even though they install under `node_modules`.
+  const includeWorkletPackages = opts.includeWorkletPackages ?? [];
+
+  // `node_modules` exclude with a carve-out for allowlisted worklet packages.
+  // When a consumer installs e.g. `@vue-lynx/motion-mini` as a real dep, the
+  // resolved path lives under `node_modules`; without this carve-out the
+  // worklet transforms would skip it and its `'main thread'` registrations
+  // would never reach the MT bundle. pnpm workspace symlinks resolve to
+  // realpaths under `packages/` and never hit this branch.
+  //
+  // Match the allowlist against the package NAME (not the raw path) so it shares
+  // the matching model used when following import specifiers — see
+  // `isWorkletPackage`.
+  const nodeModulesExcludeWithAllowlist = (resource: string): boolean => {
+    if (!/node_modules/.test(resource)) return false;
+    if (includeWorkletPackages.length === 0) return true;
+    const pkgName = packageNameFromNodeModulesPath(resource);
+    if (pkgName === null) return true;
+    return !isWorkletPackage(pkgName, includeWorkletPackages);
+  };
+
   // Worklet loader (BG layer): runs SWC JS-target transform on BG-layer
   // .js/.ts/.vue files to replace 'main thread' functions with context objects.
   api.modifyBundlerChain((chain, { environment }) => {
@@ -302,7 +329,7 @@ export function applyEntry(
       .rule('vue:worklet')
       .issuerLayer(LAYERS.BACKGROUND)
       .test(/\.(?:[cm]?[jt]sx?|vue)$/)
-      .exclude.add(/node_modules/).end()
+      .exclude.add(nodeModulesExcludeWithAllowlist).end()
       .use('worklet-loader')
       .loader(path.resolve(_dirname, './loaders/worklet-loader'))
       .end();
@@ -329,17 +356,27 @@ export function applyEntry(
     // These are sibling directories within the vue-lynx package root.
     const pkgRoot = vueLynxRoot;
     const mainThreadPkgDir = path.resolve(pkgRoot, 'main-thread');
-    const vueInternalPkgDir: string | undefined = path.resolve(pkgRoot, 'internal');
+    const vueInternalPkgDir = path.resolve(pkgRoot, 'internal');
     // The runtime dist enters the MT module graph in IFR builds (user code
     // imports 'vue-lynx' and is no longer stripped). It is library code and
     // must pass through untransformed. In pnpm workspaces it resolves via
     // symlink to a real path outside node_modules, so the /node_modules/
     // exclude alone is insufficient (same reason as main-thread above).
     const runtimePkgDir = path.resolve(pkgRoot, 'runtime');
+    const isBootstrapModule = (resource: string): boolean => {
+      const resolvedResource = path.resolve(resource);
+      return resolvedResource === mainThreadPkgDir
+        || resolvedResource.startsWith(`${mainThreadPkgDir}${path.sep}`)
+        || resolvedResource === vueInternalPkgDir
+        || resolvedResource.startsWith(`${vueInternalPkgDir}${path.sep}`)
+        || resolvedResource === runtimePkgDir
+        || resolvedResource.startsWith(`${runtimePkgDir}${path.sep}`);
+    };
 
     const workletMtOptions = {
       ifr: opts.enableIFR ?? false,
       elementTemplates: opts.enableElementTemplates ?? false,
+      includeWorkletPackages,
     };
 
     // Vue SFC on MT: vue-loader processes .vue on all layers (no issuerLayer
@@ -369,12 +406,11 @@ export function applyEntry(
       .issuerLayer(LAYERS.MAIN_THREAD)
       .test(/\.[cm]?[jt]sx?$/)
       .exclude
-      .add(/node_modules/)
-      .add(mainThreadPkgDir)
-      .add(runtimePkgDir);
-    if (vueInternalPkgDir) {
-      workletMtExclude.add(vueInternalPkgDir);
-    }
+      .add(nodeModulesExcludeWithAllowlist)
+      // A string RuleSet condition is not consistently treated as a directory
+      // prefix across Rspack versions. Match explicitly so entry-main and its
+      // dependencies can never be stripped by worklet-loader-mt.
+      .add(isBootstrapModule);
     workletMtExclude.end()
       .use('worklet-loader-mt')
       .loader(path.resolve(_dirname, './loaders/worklet-loader-mt'))

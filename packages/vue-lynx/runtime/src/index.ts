@@ -18,6 +18,7 @@
 import {
   nextTick as _vueNextTick,
   createRenderer,
+  h as _vueH,
   onActivated as _onActivated,
   onBeforeMount as _onBeforeMount,
   onBeforeUnmount as _onBeforeUnmount,
@@ -75,6 +76,11 @@ import {
 } from './main-thread-ref.js';
 import { nodeOps, resetNodeOpsState } from './node-ops.js';
 import { OP, pushOp, takeOps } from './ops.js';
+import {
+  Page,
+  PAGE_COMPONENT_NAME,
+  pageRootContextKey,
+} from './Page.js';
 import {
   resetRunOnBackgroundState,
   runOnBackground,
@@ -176,6 +182,7 @@ export function createApp(
   rootProps?: Record<string, unknown>,
 ): VueLynxApp {
   const internalApp = _createApp(rootComponent, rootProps);
+  internalApp.component(PAGE_COMPONENT_NAME, Page);
 
   const app: VueLynxApp = {
     get config() {
@@ -202,11 +209,13 @@ export function createApp(
       if (isIfrMainThread()) {
         registerMount(() => {
           const root = createPageRoot();
+          internalApp.provide(pageRootContextKey, { root, owner: null });
           internalApp.mount(root);
         });
         return;
       }
       const root = createPageRoot();
+      internalApp.provide(pageRootContextKey, { root, owner: null });
       internalApp.mount(root);
     },
 
@@ -224,6 +233,13 @@ export function createApp(
  * Unlike standard Vue's `nextTick` which only waits for the scheduler flush,
  * Vue Lynx's version also waits for the main thread to apply the ops, so
  * native Lynx elements are fully materialised when the callback fires.
+ *
+ * Caveat: some Lynx builds never invoke the `callLepusMethod` callback that
+ * carries the acknowledgement. Until the engine has delivered one real
+ * acknowledgement, each flush falls back to a short timer so `nextTick()`
+ * cannot hang forever — on such engines the materialisation guarantee is
+ * best-effort (a dev-mode warning is logged when the fallback fires). Once a
+ * real acknowledgement has been observed, the strict guarantee applies.
  *
  * @param fn - Optional callback to execute after flush
  * @returns A promise that resolves when the main thread has applied all pending ops
@@ -248,6 +264,7 @@ export {
   runOnBackground,
   transformToWorklet,
 };
+export { useGlobalEvent } from './use-global-event.js';
 
 /** @internal Exposed for upstream-tests bridge render(). */
 export { createPageRoot } from './shadow-element.js';
@@ -709,7 +726,52 @@ export { defineAsyncComponent } from '@vue/runtime-core';
  * @see {@link https://vuejs.org/api/render-function.html#h | Vue docs}
  * @public
  */
-export { h } from '@vue/runtime-core';
+function isVNodeLike(value: unknown): boolean {
+  return value != null
+    && typeof value === 'object'
+    && '__v_isVNode' in value;
+}
+
+function normalizePageSlots(children: unknown): unknown {
+  if (
+    children != null
+    && typeof children === 'object'
+    && !Array.isArray(children)
+    && !isVNodeLike(children)
+  ) {
+    return children;
+  }
+  if (typeof children === 'function') {
+    return { default: children };
+  }
+  return { default: () => children };
+}
+
+const _hWithPageRoot = (...args: unknown[]): VNode => {
+  const [type, propsOrChildren, children] = args;
+  const vueH = _vueH as (...values: unknown[]) => VNode;
+  if (type !== 'page') {
+    return vueH(...args);
+  }
+
+  if (args.length === 1) {
+    return vueH(Page);
+  }
+  if (args.length === 2) {
+    const secondArgIsChildren = Array.isArray(propsOrChildren)
+      || typeof propsOrChildren === 'function'
+      || typeof propsOrChildren === 'string'
+      || typeof propsOrChildren === 'number'
+      || isVNodeLike(propsOrChildren);
+    return secondArgIsChildren
+      ? vueH(Page, null, normalizePageSlots(propsOrChildren))
+      : vueH(Page, propsOrChildren);
+  }
+
+  return vueH(Page, propsOrChildren, normalizePageSlots(children));
+};
+
+export const h: typeof _vueH = _hWithPageRoot as typeof _vueH;
 
 /**
  * Returns the internal instance of the current component. For advanced use cases and library authors.
@@ -1080,6 +1142,29 @@ function injectVModelEvent(el: ShadowElement, vnode: VNode): void {
   }
 }
 
+/**
+ * Imperatively push a new value into the native <input>/<textarea>.
+ *
+ * `<input>`/`<textarea>` treat the `value` prop as the INITIAL value only. On
+ * native (iOS/Android) a post-mount `__SetAttribute(el, 'value', …)` — which is
+ * what OP.SET_PROP resolves to — is ignored once the control is live, so a
+ * programmatic model change (e.g. a reset/clear button) never reaches the
+ * field. The platform's `setValue` UI method is the supported way to update the
+ * text imperatively (see @lynx-js/types Input/TextArea `setValue`, iOS/Android/
+ * Harmony/Web). Web reflects the `value` attribute live, so SET_PROP already
+ * covers it there and this is a harmless redundant call.
+ *
+ * Wrapped defensively: selector-query / UI-method APIs are unavailable in some
+ * environments (in-memory test adapters), and the SET_PROP path is the fallback.
+ */
+function setNativeInputValue(el: ShadowElement, value: string): void {
+  try {
+    el.invoke({ method: 'setValue', params: { value } }).exec();
+  } catch {
+    // no-op — OP.SET_PROP already carried the value where it can be applied.
+  }
+}
+
 export const vModelText: ObjectDirective<ShadowElement> = {
   created(el, { modifiers }, vnode) {
     const isLazy = modifiers?.lazy;
@@ -1109,11 +1194,16 @@ export const vModelText: ObjectDirective<ShadowElement> = {
     // "removed" and calling REMOVE_EVENT.
     injectVModelEvent(el, vnode);
 
-    // Push value to MT only if changed
+    // Push value to MT only if changed. This branch is the programmatic path
+    // (model changed from code): user keystrokes already set el._vModelValue in
+    // the event handler, so they no-op here and never clobber the caret.
     const strVal = value == null ? '' : String(value);
     if (strVal !== el._vModelValue) {
       el._vModelValue = strVal;
+      // SET_PROP drives web (live attribute reflection) and the initial value;
+      // setValue() drives native, where the post-mount value attribute is inert.
       pushOp(OP.SET_PROP, el.id, 'value', strVal);
+      setNativeInputValue(el, strVal);
       scheduleFlush();
     }
   },
@@ -1271,10 +1361,15 @@ export function withKeys(
 }
 
 // ===========================================================================
-// Built-in components — Transition
+// Built-in components — Page, Transition
 // ===========================================================================
 
-export { Transition, TransitionGroup };
+// `Page` is the transparent wrapper behind explicit `<page>` roots — see
+// ./Page.ts for the full contract (single owner, attrs forwarded to the
+// native root). In templates, use lowercase `<page>` (rewritten by the
+// compiler) or import `Page` explicitly; only `VueLynxPage` is registered
+// globally.
+export { Page, Transition, TransitionGroup };
 
 // ===========================================================================
 // @internal — IFR (Instant First-Frame Rendering) support

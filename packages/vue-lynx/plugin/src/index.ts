@@ -29,6 +29,7 @@ import { pluginVue } from '@rsbuild/plugin-vue';
 
 import { elementTemplateTransform } from './compiler/element-template-transform.js';
 import { applyCSS } from './css.js';
+import { vueLynxCompilerOptions } from './compiler-options.js';
 import { applyEntry } from './entry.js';
 import { LAYERS } from './layers.js';
 
@@ -159,6 +160,36 @@ export interface PluginVueLynxOptions {
    * @defaultValue false
    */
   enableIFR?: boolean;
+
+  /**
+   * Allowlist of bare-import specifiers whose `'main thread'` worklets
+   * should be reached by the MT bundler.
+   *
+   * The worklet loader follows relative imports (`./foo`, `../bar`) and
+   * resolves non-relative imports: path aliases and tsconfig `paths` that
+   * point at project source (outside `node_modules`) are followed
+   * automatically. Imports resolving INTO `node_modules` are dropped by
+   * default — list the package names (or RegExps matching them) here to
+   * follow worklets shipped as a published/installed package.
+   *
+   * Both checkpoints reduce their input to the package root before matching,
+   * so a pattern always matches the package name (e.g. `'@my-org/foo'`), never
+   * a subpath or the resolved filesystem path:
+   *   - strings match the root exactly — `'@vue-lynx/motion-mini'` covers the
+   *     package and all its subpath imports, but NOT `'@vue-lynx/motion-mini-x'`;
+   *   - a RegExp like `/^@my-org\//` matches whether the package is reached as
+   *     an import or carved out of the `node_modules` loader exclude.
+   *
+   * @example
+   * ```ts
+   * pluginVueLynx({
+   *   includeWorkletPackages: ['@vue-lynx/motion-mini', /^@my-org\/lynx-/],
+   * })
+   * ```
+   *
+   * @defaultValue []
+   */
+  includeWorkletPackages?: ReadonlyArray<string | RegExp>;
 }
 
 /**
@@ -183,6 +214,7 @@ export function pluginVueLynx(
     debugInfoOutside = true,
     autoPixelUnit = true,
     enableIFR = false,
+    includeWorkletPackages = [],
   } = options;
   const enableElementTemplates = options.enableElementTemplates ?? enableIFR;
 
@@ -191,23 +223,17 @@ export function pluginVueLynx(
     pluginVue({
       vueLoaderOptions: {
         experimentalInlineMatchResource: true,
-        compilerOptions: {
-          // Lynx native tags (view, text, image, etc.) should not be resolved
-          // via resolveComponent — treat everything as native.
-          isNativeTag: () => true,
-          whitespace: 'condense',
-          // Disable static hoisting: @vue/compiler-dom's stringifyStatic
-          // transform converts runs of 5+ constant-prop siblings into a single
-          // HTML string VNode requiring insertStaticContent() in the renderer.
-          // Our ShadowElement custom renderer can't parse HTML strings, so we
-          // disable hoisting entirely — the standard approach for non-DOM renderers.
-          hoistStatic: false,
-          // Element templates: lower eligible static-structure subtrees into
-          // main-thread element templates (single INSTANTIATE op + holes).
-          ...(enableElementTemplates
-            ? { nodeTransforms: [elementTemplateTransform] }
-            : {}),
-        },
+        // Element templates: lower eligible static-structure subtrees into
+        // main-thread element templates (single INSTANTIATE op + holes).
+        compilerOptions: enableElementTemplates
+          ? {
+            ...vueLynxCompilerOptions,
+            nodeTransforms: [
+              ...vueLynxCompilerOptions.nodeTransforms,
+              elementTemplateTransform,
+            ],
+          }
+          : vueLynxCompilerOptions,
       },
     }),
 
@@ -319,6 +345,7 @@ export function pluginVueLynx(
           debugInfoOutside,
           enableIFR,
           enableElementTemplates,
+          includeWorkletPackages,
         });
       },
     },
