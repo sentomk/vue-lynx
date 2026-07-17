@@ -1,27 +1,28 @@
 <script setup lang="ts">
 // A collapsing-header + sticky-tab-bar + horizontally-paged scaffold — the
-// "native profile" pattern (Twitter/X, Mastodon apps): the #header slot
-// scrolls away, the tab bar pins to the top, and the panes below it keep
-// swiping horizontally, each with its own vertical scroll.
+// "native profile" pattern (Twitter/X, Mastodon apps): the #header scrolls
+// away, the tab bar rises with it and pins to the top once you scroll onto
+// it, and the panes below keep swiping horizontally, each with its own
+// vertical scroll.
 //
-// It wraps Lynx's scroll-coordinator (a.k.a. foldview) — an outer vertical
-// scroller whose header collapses until the toolbar sticks, after which the
-// active pane's inner list takes over the scroll — around the same
-// two-way-synced viewpager used by TabPager.vue.
+// It uses Lynx's scroll-coordinator (a.k.a. foldview): an absolutely
+// positioned header that collapses, and a flex slot that holds the tab bar
+// *above* the viewpager. As the coordinator scrolls, the whole slot slides
+// up under the collapsing header until the tab bar reaches the top and pins;
+// the slot then hands the scroll to the active viewpager pane's list. The
+// tabs live in the slot (not in a sticky toolbar), which is what makes them
+// start below the card and stick only on scroll.
 import type { ShadowElement } from 'vue-lynx';
 import { computed, ref, useTemplateRef, watch } from 'vue-lynx';
 
 declare const SystemInfo: { platform?: string } | undefined;
 
 // Like the viewpager, the coordinator element is registered under different
-// names per platform: Lynx for Web ships the legacy XElement foldview names
-// (x-foldview-*-ng), while native OSS engines register the extracted
-// scroll-coordinator element (lynx-family/lynx). Both expose the same
-// header / toolbar / slot structure.
+// names per platform: Lynx for Web ships the legacy XElement foldview names,
+// while native OSS engines register the extracted scroll-coordinator element.
 const isWeb = typeof SystemInfo !== 'undefined' && SystemInfo?.platform === 'web';
 const foldTag = isWeb ? 'x-foldview-ng' : 'scroll-coordinator';
 const foldHeaderTag = isWeb ? 'x-foldview-header-ng' : 'scroll-coordinator-header';
-const foldToolbarTag = isWeb ? 'x-foldview-toolbar-ng' : 'scroll-coordinator-toolbar';
 const foldSlotTag = isWeb ? 'x-foldview-slot-ng' : 'scroll-coordinator-slot';
 const pagerTag = isWeb ? 'x-viewpager-ng' : 'viewpager';
 const pagerItemTag = isWeb ? 'x-viewpager-item-ng' : 'viewpager-item';
@@ -71,7 +72,9 @@ watch(activeIndex, (index) => {
       <slot name="header" />
     </component>
 
-    <component :is="foldToolbarTag" class="stv-toolbar">
+    <component :is="foldSlotTag" class="stv-slot">
+      <!-- Tab bar sits at the top of the slot, above the viewpager. It rides
+           up with the collapsing header and pins once it reaches the top. -->
       <view class="stv-bar">
         <view
           v-for="t in tabs"
@@ -83,9 +86,7 @@ watch(activeIndex, (index) => {
           <view class="stv-tab-underline" :class="modelValue === t.key ? 'stv-tab-underline-active' : ''" />
         </view>
       </view>
-    </component>
 
-    <component :is="foldSlotTag" class="stv-slot">
       <component
         :is="pagerTag"
         ref="pagerRef"
@@ -108,20 +109,35 @@ watch(activeIndex, (index) => {
 
 <style>
 .stv {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   width: 100%;
 }
 
-.stv-toolbar {
-  /* Opaque so collapsed header content never shows through the pinned bar. */
-  background-color: var(--c-bg-base);
+.stv-header {
+  position: absolute;
+  width: 100%;
+}
+
+.stv-slot {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  /* Web (foldview) is a standard-flexbox container, so a Lynx flex weight
+     doesn't reach this raw child — a definite height keeps the slot filled. */
+  height: 100%;
 }
 
 .stv-bar {
   display: flex;
   flex-direction: row;
+  flex-shrink: 0;
   border-bottom: 1px solid var(--c-border);
+  /* Opaque so the collapsing header never shows through the pinned tab bar. */
+  background-color: var(--c-bg-base);
 }
 
 .stv-tab {
@@ -159,18 +175,10 @@ watch(activeIndex, (index) => {
   transform: scaleX(1);
 }
 
-.stv-slot {
-  /* The coordinator element is a standard-flexbox container (not a Lynx
-     linear one), so a Lynx `flex: 1` weight doesn't reach this raw child —
-     give the slot a definite height so the viewpager/panes below it fill. */
-  height: 100%;
-  width: 100%;
-}
-
 .stv-pages {
   flex: 1;
+  min-height: 0;
   width: 100%;
-  height: 100%;
 }
 
 .stv-page {
