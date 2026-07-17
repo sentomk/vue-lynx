@@ -1,4 +1,6 @@
-# 首屏直出（IFR）
+import { Badge } from '@theme';
+
+# 首屏直出（IFR） <Badge text="v0.5" type="tip" />
 
 首屏直出（Instant First-Frame Rendering，IFR）会在 `loadTemplate` 期间、后台线程启动之前绘制真实内容。Vue Lynx 将 IFR 与元素模板（Element Templates，ET）组合使用：IFR 消除等待后台线程造成的白屏，ET 则降低主线程同步渲染静态结构子树的成本。
 
