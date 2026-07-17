@@ -4,6 +4,9 @@
 
 import { queuePostFlushCb } from '@vue/runtime-core';
 
+import { IFR_APPLY_OPS_GLOBAL } from 'vue-lynx/internal/ops';
+
+import { isIfrMainThread } from './ifr-env.js';
 import { takeOps } from './ops.js';
 
 /**
@@ -121,6 +124,20 @@ function doFlush(): void {
   scheduled = false;
   const ops = takeOps();
   if (ops.length === 0) return;
+
+  // IFR main-thread render: the Vue app is running *on* the main thread, so
+  // ops are applied locally and synchronously — no cross-thread call, no ack
+  // tracking needed.  The hook is installed by vue-lynx/main-thread's IFR
+  // bootstrap (enableIFR) before user code evaluates.
+  if (isIfrMainThread()) {
+    const applyLocal = (globalThis as Record<string, unknown>)[
+      IFR_APPLY_OPS_GLOBAL
+    ] as ((ops: unknown[]) => void) | undefined;
+    if (applyLocal) {
+      applyLocal(ops);
+      return;
+    }
+  }
 
   // Create the ack promise BEFORE sending so that any `nextTick` call that
   // resolves after this point will chain on it.  Once the engine has proven

@@ -4,8 +4,14 @@
 
 import type { RendererOptions } from '@vue/runtime-core';
 
+import {
+  TPL_HOLE_PREFIX,
+  TPL_TYPE_PREFIX,
+  getElementTemplateHoles,
+} from './element-template.js';
 import { register, unregister, updateHandler } from './event-registry.js';
 import { scheduleFlush } from './flush.js';
+import { isIfrMainThread } from './ifr-env.js';
 import { OP, pushOp } from './ops.js';
 import { registerWorkletCtx } from './run-on-background.js';
 import { scopeIdToCssId } from './scope-bridge.js';
@@ -168,8 +174,48 @@ export function resolveClass(el: ShadowElement): string {
 // RendererOptions implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Mount a compile-time-lowered element template (`__vlx-tpl:<id>` vnode).
+ *
+ * One ShadowElement represents the whole subtree; hole shadows are allocated
+ * immediately after it (no CREATE ops — the main thread materializes the
+ * subtree inside the template's create() function and maps rootId+1+i to the
+ * i-th hole). Subsequent updates flow through patchProp's hole delegation
+ * below using ordinary SET_* ops.
+ */
+function createTemplateInstance(type: string): ShadowElement {
+  const tplId = type.slice(TPL_TYPE_PREFIX.length);
+  const holeKeys = getElementTemplateHoles(tplId);
+  const el = new ShadowElement(type);
+  if (!holeKeys) {
+    // Unregistered template (should not happen — registration is hoisted in
+    // the same module as the render fn). Degrade to an empty view so the
+    // surrounding tree still renders.
+    if (__DEV__) {
+      console.error(
+        `[vue-lynx] element template "${tplId}" is not registered — rendering an empty view.`,
+      );
+    }
+    pushOp(OP.CREATE, el.id, 'view');
+    scheduleFlush();
+    return el;
+  }
+  const holes: ShadowElement[] = [];
+  for (const _ of holeKeys) {
+    holes.push(new ShadowElement('#tpl-hole'));
+  }
+  el._tplHoleKeys = holeKeys;
+  el._tplHoles = holes;
+  pushOp(OP.INSTANTIATE_TEMPLATE, el.id, tplId, holeKeys.length);
+  scheduleFlush();
+  return el;
+}
+
 export const nodeOps: RendererOptions<ShadowElement, ShadowElement> = {
   createElement(type: string): ShadowElement {
+    if (type.startsWith(TPL_TYPE_PREFIX)) {
+      return createTemplateInstance(type);
+    }
     // Lynx owns exactly one native <page>, created before the app runs. A
     // `page` vnode must go through the transparent Page built-in (the plugin
     // compiler rewrites template <page> tags; the exported `h` routes
@@ -322,9 +368,33 @@ export const nodeOps: RendererOptions<ShadowElement, ShadowElement> = {
   patchProp(
     el: ShadowElement,
     key: string,
-    _prevValue: unknown,
+    prevValue: unknown,
     nextValue: unknown,
   ): void {
+    // ------------------------------------------------------------------
+    // Element-template holes: a lowered template vnode carries its interior
+    // dynamic parts as __hN props. Delegate to the hole's ShadowElement with
+    // the original prop key so the full event/class/style logic is reused.
+    // ------------------------------------------------------------------
+    if (el._tplHoles !== undefined && key.startsWith(TPL_HOLE_PREFIX)) {
+      const idx = Number(key.slice(TPL_HOLE_PREFIX.length));
+      const holeKey = el._tplHoleKeys?.[idx];
+      const holeEl = el._tplHoles[idx];
+      if (holeKey !== undefined && holeEl !== undefined) {
+        if (holeKey === '#text') {
+          pushOp(
+            OP.SET_TEXT,
+            holeEl.id,
+            nextValue == null ? '' : String(nextValue),
+          );
+          scheduleFlush();
+        } else {
+          nodeOps.patchProp(holeEl, holeKey, prevValue, nextValue);
+        }
+        return;
+      }
+    }
+
     // ------------------------------------------------------------------
     // Main-thread worklet props: :main-thread-bindtap, :main-thread-ref
     // ------------------------------------------------------------------
@@ -346,7 +416,11 @@ export const nodeOps: RendererOptions<ShadowElement, ShadowElement> = {
         // Worklet event — suffix is an event key like "bindtap", "bindscroll"
         const event = parseEventProp(suffix);
         if (event && nextValue != null) {
-          registerWorkletCtx(nextValue as Worklet);
+          // registerWorkletCtx wires up runOnBackground dispatch via
+          // lynx.getCoreContext() — a background-thread API.  During an IFR
+          // main-thread render the hydration pass re-applies the background
+          // thread's worklet ctx anyway, so skip the BG-side bookkeeping.
+          if (!isIfrMainThread()) registerWorkletCtx(nextValue as Worklet);
           pushOp(
             OP.SET_WORKLET_EVENT,
             el.id,

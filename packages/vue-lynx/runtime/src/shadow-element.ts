@@ -17,6 +17,8 @@ import type {
   uiMethodOptions,
 } from '@lynx-js/types';
 
+import { PAGE_ROOT_ID } from 'vue-lynx/internal/ops';
+
 export class ShadowElement {
   static nextId = 2; // 1 is reserved for the page root
 
@@ -55,6 +57,12 @@ export class ShadowElement {
 
   // ID for Teleport target resolution (idRegistry lookup).
   _id: string | undefined = undefined;
+
+  // Element-template instance state (only set on lowered template roots —
+  // see element-template.ts). Hole shadows are allocated contiguously after
+  // the root id so both threads agree on ids without shipping them.
+  _tplHoleKeys: string[] | undefined = undefined;
+  _tplHoles: ShadowElement[] | undefined = undefined;
 
   constructor(type: string, forceId?: number) {
     if (forceId === undefined) {
@@ -177,7 +185,7 @@ export class ShadowElement {
   }
 }
 
-export const PAGE_ROOT_ID = 1;
+export { PAGE_ROOT_ID };
 
 /** Create the page root shadow element with the reserved id=1. */
 export function createPageRoot(): ShadowElement {
