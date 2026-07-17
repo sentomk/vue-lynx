@@ -7,6 +7,10 @@ const count = ref(0)
 </script>
 
 <template>
+  <!--
+    Teleport targets must appear earlier in the tree than their <Teleport>
+    consumers so querySelector can resolve them at mount time.
+  -->
   <view
     :style="{
       width: '100%',
@@ -15,6 +19,28 @@ const count = ref(0)
       backgroundColor: '#f0f2f5',
     }"
   >
+    <!--
+      Full-screen overlay host. Styles live on the target itself so
+      teleported children do not depend on absolute positioning inside
+      an empty zero-size mount point (which collapses on Lynx).
+    -->
+    <view
+      id="overlay-root"
+      :style="{
+        position: 'absolute',
+        top: '0px',
+        left: '0px',
+        right: '0px',
+        bottom: '0px',
+        zIndex: 1000,
+        display: showModal ? 'flex' : 'none',
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0,0,0,0.45)',
+      }"
+      @tap="showModal = false"
+    />
+
     <scroll-view
       scroll-orientation="vertical"
       :style="{ width: '100%', height: '100%', padding: '16px' }"
@@ -49,50 +75,33 @@ const count = ref(0)
           <text :style="{ color: '#fff', fontSize: '14px' }">Open Modal</text>
         </view>
 
-        <Teleport to="#overlay-root">
+        <Teleport v-if="showModal" to="#overlay-root">
           <view
-            v-if="showModal"
             :style="{
-              position: 'absolute',
-              top: '0px',
-              left: '0px',
-              right: '0px',
-              bottom: '0px',
-              backgroundColor: 'rgba(0,0,0,0.45)',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              zIndex: 1000,
+              width: '280px',
+              padding: '20px',
+              backgroundColor: '#fff',
+              borderRadius: '12px',
             }"
-            @tap="showModal = false"
+            @tap.stop
           >
+            <text :style="{ fontSize: '16px', fontWeight: 'bold', marginBottom: '8px' }">
+              Teleported Modal
+            </text>
+            <text :style="{ fontSize: '13px', color: '#555', marginBottom: '16px' }">
+              This content was rendered under #overlay-root via
+              &lt;Teleport to="#overlay-root"&gt;.
+            </text>
             <view
               :style="{
-                width: '280px',
-                padding: '20px',
-                backgroundColor: '#fff',
-                borderRadius: '12px',
+                padding: '8px 14px',
+                backgroundColor: '#4a90d9',
+                borderRadius: '6px',
+                alignSelf: 'flex-end',
               }"
-              @tap.stop
+              @tap="showModal = false"
             >
-              <text :style="{ fontSize: '16px', fontWeight: 'bold', marginBottom: '8px' }">
-                Teleported Modal
-              </text>
-              <text :style="{ fontSize: '13px', color: '#555', marginBottom: '16px' }">
-                This content was rendered under #overlay-root via
-                &lt;Teleport to="#overlay-root"&gt;.
-              </text>
-              <view
-                :style="{
-                  padding: '8px 14px',
-                  backgroundColor: '#4a90d9',
-                  borderRadius: '6px',
-                  alignSelf: 'flex-end',
-                }"
-                @tap="showModal = false"
-              >
-                <text :style="{ color: '#fff', fontSize: '13px' }">Close</text>
-              </view>
+              <text :style="{ color: '#fff', fontSize: '13px' }">Close</text>
             </view>
           </view>
         </Teleport>
@@ -123,12 +132,12 @@ const count = ref(0)
           <view
             :style="{
               padding: '8px 12px',
-              backgroundColor: teleportDisabled ? '#e67e22' : '#ddd',
+              backgroundColor: teleportDisabled ? '#e67e22' : '#95a5a6',
               borderRadius: '6px',
             }"
             @tap="teleportDisabled = !teleportDisabled"
           >
-            <text :style="{ color: teleportDisabled ? '#fff' : '#333', fontSize: '13px' }">
+            <text :style="{ color: '#fff', fontSize: '13px' }">
               disabled: {{ teleportDisabled }}
             </text>
           </view>
@@ -165,8 +174,5 @@ const count = ref(0)
         </view>
       </view>
     </scroll-view>
-
-    <!-- Mount point for the modal Teleport — keep it empty so it does not block taps -->
-    <view id="overlay-root" />
   </view>
 </template>

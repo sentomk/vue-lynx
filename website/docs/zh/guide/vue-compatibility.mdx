@@ -281,7 +281,8 @@ export default defineComponent({
 Vue 的 [`<Teleport>`](https://cn.vuejs.org/guide/built-ins/teleport.html) 可以将模板片段渲染到 UI 树中的另一处。Vue Lynx 通过后台线程的 `idRegistry` 查找支持 `to="#id"` 字符串选择器——典型用法是触发器在组件树深处，弹层却渲染到页面根节点。
 
 :::warning 注意事项
-暂不支持直接传入元素 ref，以及非 ID 选择器（例如 `to=".class"` 或 `to="body"`）。请给目标节点设置 `id`，并用 `to="#that-id"` 指向它。
+- 暂不支持直接传入元素 ref，以及非 ID 选择器（例如 `to=".class"` 或 `to="body"`）。请给目标节点设置 `id`，并用 `to="#that-id"` 指向它。
+- `<Teleport>` 挂载时目标元素必须已经存在——把带 `id` 的宿主放在 `<Teleport>` 之前（或放在拥有它的组件之外）。Vue 无法解析与 teleport 同一次渲染才创建出来的目标。
 :::
 
 下面的示例演示了传送到 `#overlay-root` 的弹层，以及带 `disabled` prop 的响应式内容：
